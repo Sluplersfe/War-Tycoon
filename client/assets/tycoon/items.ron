@@ -1,0 +1,97 @@
+// Base items. Positions are plot-local metres: +Z faces the island centre
+// (the gate), the player spawns at (0, 1.5, -20). `button` is where the buy
+// pad appears once `requires` are owned. Costs are cash; `rank` gates items.
+Catalog(
+    lines: [
+        // Production lines: ore drops onto the conveyor, rides +X through any
+        // upgraders, and its value is banked at the collector.
+        (start: (-33.0, -28.0), end: (11.0, -28.0), collector: (14.0, -28.0)),
+        (start: (-33.0, -14.0), end: (11.0, -14.0), collector: (14.0, -14.0)),
+    ],
+    claim_pad: (19.0, -21.0),
+    items: [
+        // ---------- line 1 ----------
+        (id: "starter_line", name: "Starter Line", cost: 0, requires: [], rank: 0,
+         kind: Line(line: 0), pos: (0.0, 0.0, -28.0), button: (-4.0, -21.0)),
+        (id: "dropper_1", name: "Ore Dropper I", cost: 0, requires: ["starter_line"], rank: 0,
+         kind: Dropper(line: 0, value: 4.0, interval: 2.0), pos: (-30.0, 0.0, -28.0), button: (-30.0, -24.0)),
+        (id: "dropper_2", name: "Ore Dropper II", cost: 150, requires: ["dropper_1"], rank: 0,
+         kind: Dropper(line: 0, value: 6.0, interval: 2.0), pos: (-24.0, 0.0, -28.0), button: (-24.0, -24.0)),
+        (id: "dropper_3", name: "Ore Dropper III", cost: 400, requires: ["dropper_2"], rank: 0,
+         kind: Dropper(line: 0, value: 10.0, interval: 2.0), pos: (-18.0, 0.0, -28.0), button: (-18.0, -24.0)),
+        (id: "upgrader_1", name: "Smelter", cost: 900, requires: ["dropper_3"], rank: 0,
+         kind: Upgrader(line: 0, mult: 1.5), pos: (0.0, 0.0, -28.0), button: (0.0, -24.0)),
+        (id: "dropper_4", name: "Ore Dropper IV", cost: 1600, requires: ["upgrader_1"], rank: 0,
+         kind: Dropper(line: 0, value: 18.0, interval: 2.0), pos: (-12.0, 0.0, -28.0), button: (-12.0, -24.0)),
+        (id: "dropper_5", name: "Ore Dropper V", cost: 3000, requires: ["dropper_4"], rank: 1,
+         kind: Dropper(line: 0, value: 30.0, interval: 2.0), pos: (-6.0, 0.0, -28.0), button: (-6.0, -24.0)),
+        (id: "upgrader_2", name: "Refinery", cost: 5500, requires: ["dropper_5"], rank: 1,
+         kind: Upgrader(line: 0, mult: 2.0), pos: (6.0, 0.0, -28.0), button: (6.0, -24.0)),
+
+        // ---------- line 2 ----------
+        (id: "line_2", name: "Second Line", cost: 8000, requires: ["upgrader_2"], rank: 1,
+         kind: Line(line: 1), pos: (0.0, 0.0, -14.0), button: (4.0, -18.0)),
+        (id: "dropper_2a", name: "Heavy Dropper I", cost: 0, requires: ["line_2"], rank: 1,
+         kind: Dropper(line: 1, value: 60.0, interval: 2.0), pos: (-30.0, 0.0, -14.0), button: (-30.0, -18.0)),
+        (id: "dropper_2b", name: "Heavy Dropper II", cost: 14000, requires: ["dropper_2a"], rank: 1,
+         kind: Dropper(line: 1, value: 90.0, interval: 2.0), pos: (-24.0, 0.0, -14.0), button: (-24.0, -18.0)),
+        (id: "dropper_2c", name: "Heavy Dropper III", cost: 24000, requires: ["dropper_2b"], rank: 2,
+         kind: Dropper(line: 1, value: 140.0, interval: 2.0), pos: (-18.0, 0.0, -14.0), button: (-18.0, -18.0)),
+        (id: "upgrader_3", name: "Alloy Press", cost: 40000, requires: ["dropper_2c"], rank: 2,
+         kind: Upgrader(line: 1, mult: 2.0), pos: (2.0, 0.0, -14.0), button: (0.0, -18.0)),
+        (id: "dropper_2d", name: "Heavy Dropper IV", cost: 65000, requires: ["upgrader_3"], rank: 2,
+         kind: Dropper(line: 1, value: 220.0, interval: 2.0), pos: (-12.0, 0.0, -14.0), button: (-12.0, -18.0)),
+
+        // ---------- walls & defence ----------
+        (id: "wall_back", name: "Back Wall", cost: 200, requires: ["dropper_2"], rank: 0,
+         kind: Wall(size: (72.0, 5.0, 1.2)), pos: (0.0, 0.0, -35.4), button: (10.0, -8.0)),
+        (id: "wall_sides", name: "Side Walls", cost: 600, requires: ["wall_back"], rank: 0,
+         kind: Walls(parts: [((-35.4, 0.0, 0.0), (1.2, 5.0, 72.0)), ((35.4, 0.0, 0.0), (1.2, 5.0, 72.0))]),
+         pos: (0.0, 0.0, 0.0), button: (14.0, -8.0)),
+        (id: "wall_front", name: "Front Wall & Gate", cost: 1200, requires: ["wall_sides"], rank: 0,
+         kind: Walls(parts: [((-21.0, 0.0, 35.4), (30.0, 5.0, 1.2)), ((21.0, 0.0, 35.4), (30.0, 5.0, 1.2))]),
+         pos: (0.0, 0.0, 0.0), button: (18.0, -8.0)),
+        (id: "tower_left", name: "Guard Tower (West)", cost: 2500, requires: ["wall_front"], rank: 0,
+         kind: Tower, pos: (-31.0, 0.0, 31.0), button: (-26.0, 26.0)),
+        (id: "tower_right", name: "Guard Tower (East)", cost: 2500, requires: ["wall_front"], rank: 0,
+         kind: Tower, pos: (31.0, 0.0, 31.0), button: (26.0, 26.0)),
+        (id: "turret_left", name: "Auto Turret (West)", cost: 12000, requires: ["tower_left"], rank: 2,
+         kind: Turret(damage: 8.0, range: 45.0, rate: 2.0), pos: (-31.0, 10.0, 31.0), button: (-26.0, 22.0)),
+        (id: "turret_right", name: "Auto Turret (East)", cost: 12000, requires: ["tower_right"], rank: 2,
+         kind: Turret(damage: 8.0, range: 45.0, rate: 2.0), pos: (31.0, 10.0, 31.0), button: (26.0, 22.0)),
+
+        // ---------- armoury ----------
+        (id: "rack_rifle", name: "Rifle Rack", cost: 700, requires: ["dropper_2"], rank: 0,
+         kind: WeaponRack(weapon: "rifle"), pos: (-32.0, 0.0, -4.0), button: (-27.0, -4.0)),
+        (id: "rack_smg", name: "SMG Rack", cost: 1800, requires: ["rack_rifle"], rank: 0,
+         kind: WeaponRack(weapon: "smg"), pos: (-32.0, 0.0, 1.0), button: (-27.0, 1.0)),
+        (id: "rack_shotgun", name: "Scattergun Rack", cost: 4000, requires: ["rack_smg"], rank: 1,
+         kind: WeaponRack(weapon: "shotgun"), pos: (-32.0, 0.0, 6.0), button: (-27.0, 6.0)),
+        (id: "rack_sniper", name: "Marksman Rack", cost: 15000, requires: ["rack_shotgun"], rank: 2,
+         kind: WeaponRack(weapon: "sniper"), pos: (-32.0, 0.0, 11.0), button: (-27.0, 11.0)),
+        (id: "rack_rocket", name: "Launcher Rack", cost: 35000, requires: ["rack_sniper"], rank: 3,
+         kind: WeaponRack(weapon: "rocket"), pos: (-32.0, 0.0, 16.0), button: (-27.0, 16.0)),
+
+        // ---------- support ----------
+        (id: "barracks", name: "Barracks (+25 max health)", cost: 2000, requires: ["wall_back"], rank: 0,
+         kind: Barracks(max_health: 25.0), pos: (28.0, 0.0, -24.0), button: (22.0, -8.0)),
+        (id: "medstation", name: "Med Station", cost: 3500, requires: ["barracks"], rank: 1,
+         kind: MedStation, pos: (29.0, 0.0, -6.0), button: (24.0, -4.0)),
+        (id: "armor_depot", name: "Armor Depot (+50 armor)", cost: 20000, requires: ["medstation"], rank: 2,
+         kind: ArmorDepot(armor: 50.0), pos: (29.0, 0.0, 4.0), button: (24.0, 4.0)),
+
+        // ---------- vehicles ----------
+        (id: "pad_jeep", name: "Jeep Pad", cost: 2500, requires: ["wall_front"], rank: 0,
+         kind: VehiclePad(vehicle: "jeep"), pos: (16.0, 0.0, 16.0), button: (10.0, 12.0)),
+        (id: "garage_tank", name: "Tank Garage", cost: 50000, requires: ["pad_jeep", "upgrader_3"], rank: 3,
+         kind: VehiclePad(vehicle: "tank"), pos: (26.0, 0.0, 20.0), button: (18.0, 26.0)),
+        (id: "helipad", name: "Helipad", cost: 80000, requires: ["pad_jeep", "dropper_2d"], rank: 4,
+         kind: VehiclePad(vehicle: "heli"), pos: (-16.0, 0.0, 20.0), button: (-10.0, 12.0)),
+        (id: "airstrip", name: "Airstrip", cost: 120000, requires: ["helipad"], rank: 5,
+         kind: VehiclePad(vehicle: "plane"), pos: (0.0, 0.0, 26.0), button: (-6.0, 26.0)),
+
+        // ---------- headquarters ----------
+        (id: "hq", name: "Headquarters (unlocks Rebirth)", cost: 250000, requires: ["dropper_2d", "armor_depot"], rank: 4,
+         kind: Headquarters, pos: (0.0, 0.0, 6.0), button: (0.0, -6.0)),
+    ],
+)

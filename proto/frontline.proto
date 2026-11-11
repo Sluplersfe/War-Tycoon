@@ -1,0 +1,433 @@
+// Frontline Foundry wire protocol.
+//
+// TCP 4002: each frame is a 4-byte big-endian length followed by one
+//   ClientMsg (client -> server) or ServerMsg (server -> client).
+// UDP 4003: each datagram is one UdpPacket.
+//
+// Ownership: every networked object has one owner (a user id, or 0 = SERVER)
+// and an epoch that increments on every ownership change. The server drops
+// updates from non-owners and updates carrying a stale epoch.
+syntax = "proto3";
+
+package frontline.v1;
+
+option go_package = "frontline/internal/pb;pb";
+
+// ---------- common ----------
+
+message Vec3 {
+  float x = 1;
+  float y = 2;
+  float z = 3;
+}
+
+message Quat {
+  float x = 1;
+  float y = 2;
+  float z = 3;
+  float w = 4;
+}
+
+enum ObjectKind {
+  OBJECT_KIND_UNSPECIFIED = 0;
+  OBJECT_KIND_PLAYER = 1;
+  OBJECT_KIND_VEHICLE = 2;
+  OBJECT_KIND_PROP = 3;
+}
+
+message ObjectState {
+  Vec3 pos = 1;
+  Quat rot = 2;
+  Vec3 vel = 3;
+  Vec3 angvel = 4;
+  float health = 5;
+  // Kind-specific extras: turret yaw/pitch, rotor speed, aim pitch, animation flags.
+  repeated float extra = 6;
+}
+
+message ObjectInfo {
+  uint64 id = 1;
+  ObjectKind kind = 2;
+  string def = 3;      // definition id, e.g. "jeep", "tank", "soldier"
+  uint64 owner = 4;    // user id, 0 = SERVER
+  uint32 epoch = 5;
+  ObjectState state = 6;
+  // Seat occupants by seat index (0 = driver). 0 = empty.
+  repeated uint64 seats = 7;
+  uint64 spawned_by = 8;
+}
+
+message Team {
+  string name = 1;
+  uint32 color = 2; // 0xRRGGBB
+}
+
+message RoomSettings {
+  uint32 max_players = 1;
+  bool friendly_fire = 2;
+  repeated Team teams = 3;
+  float cash_multiplier = 4;
+  int64 starting_cash = 5;
+  int64 kill_reward = 6;
+  bool persist_vehicles = 7;
+  bool locked = 8; // only existing members may join
+}
+
+message RoomSummary {
+  uint64 id = 1;
+  string name = 2;
+  uint64 host_id = 3;
+  string host_name = 4;
+  uint32 online = 5;
+  uint32 max_players = 6;
+  bool archived = 7;
+  bool member = 8;
+  int64 created_at = 9;
+  bool live = 10;
+}
+
+message Progress {
+  int64 cash = 1;
+  int64 xp = 2;
+  uint32 rank = 3;
+  uint32 rebirths = 4;
+  // JSON document of the player's base (purchased item ids, etc.), owned by the client.
+  string base_json = 5;
+  int64 kills = 6;
+  int64 deaths = 7;
+}
+
+message PlayerInfo {
+  uint64 user_id = 1;
+  string username = 2;
+  uint32 team = 3;
+  uint32 plot = 4;
+  bool online = 5;
+  bool host = 6;
+  Progress progress = 7;
+  uint64 avatar_id = 8; // object id of the player's character
+  bool banned = 9;
+}
+
+// ---------- TCP client -> server ----------
+
+message Register {
+  string username = 1;
+  string password = 2;
+}
+
+message Login {
+  string username = 1;
+  string password = 2;
+}
+
+message Resume {
+  string token = 1;
+}
+
+message ListRooms {
+  bool include_archived = 1;
+}
+
+message CreateRoom {
+  string name = 1;
+  RoomSettings settings = 2;
+}
+
+message JoinRoom {
+  uint64 room_id = 1;
+}
+
+message LeaveRoom {}
+
+message SendChat {
+  string text = 1;
+}
+
+message ChooseTeam {
+  uint32 team = 1;
+}
+
+// Request a new object. The requester owns it unless unowned = true.
+message SpawnObject {
+  ObjectKind kind = 1;
+  string def = 2;
+  ObjectState state = 3;
+  bool unowned = 4;
+}
+
+message DespawnObject {
+  uint64 id = 1;
+  bool destroyed = 2; // play destruction effects
+}
+
+// Request ownership by taking a seat (seat 0 = driver takes ownership).
+message ClaimObject {
+  uint64 id = 1;
+  uint32 seat = 2;
+}
+
+// Leave a seat / give up ownership. Final state is handed to the next owner.
+message ReleaseObject {
+  uint64 id = 1;
+  ObjectState state = 2;
+}
+
+message SaveProgress {
+  Progress progress = 1;
+}
+
+// Shooter reports a hit; the server forwards it to the target's owner.
+message HitReport {
+  uint64 target_id = 1;
+  float damage = 2;
+  string weapon = 3;
+  Vec3 point = 4;
+}
+
+// Victim reports its own death.
+message DeathReport {
+  uint64 killer_id = 1; // user id, 0 = environment
+  string weapon = 2;
+}
+
+message AdminCommand {
+  oneof cmd {
+    uint64 kick = 1;
+    uint64 ban = 2;
+    uint64 unban = 3;
+    GiveCash give_cash = 4;
+    SetRank set_rank = 5;
+    uint64 reset_player = 6;
+    RoomSettings update_settings = 7;
+    uint64 transfer_host = 8;
+    bool archive = 9;
+    uint64 unarchive_room = 10;
+    ReassignObject reassign = 11;
+    uint64 despawn = 12;
+    SetTeam set_team = 13;
+  }
+}
+
+message GiveCash {
+  uint64 user_id = 1;
+  int64 amount = 2;
+}
+
+message SetRank {
+  uint64 user_id = 1;
+  uint32 rank = 2;
+}
+
+message ReassignObject {
+  uint64 object_id = 1;
+  uint64 new_owner = 2;
+}
+
+message SetTeam {
+  uint64 user_id = 1;
+  uint32 team = 2;
+}
+
+message Ping {
+  int64 client_time_ms = 1;
+}
+
+// Host-only: recent admin audit log.
+message ListEvents {}
+
+message ClientMsg {
+  oneof msg {
+    Register register = 1;
+    Login login = 2;
+    Resume resume = 3;
+    ListRooms list_rooms = 4;
+    CreateRoom create_room = 5;
+    JoinRoom join_room = 6;
+    LeaveRoom leave_room = 7;
+    SendChat chat = 8;
+    ChooseTeam choose_team = 9;
+    SpawnObject spawn = 10;
+    DespawnObject despawn = 11;
+    ClaimObject claim = 12;
+    ReleaseObject release = 13;
+    SaveProgress save_progress = 14;
+    HitReport hit = 15;
+    DeathReport death = 16;
+    AdminCommand admin = 17;
+    Ping ping = 18;
+    ListEvents list_events = 19;
+  }
+}
+
+// ---------- TCP server -> client ----------
+
+message AuthOk {
+  uint64 user_id = 1;
+  string username = 2;
+  string token = 3;
+}
+
+message Error {
+  string code = 1;
+  string message = 2;
+}
+
+message RoomList {
+  repeated RoomSummary rooms = 1;
+}
+
+message RoomJoined {
+  RoomSummary room = 1;
+  RoomSettings settings = 2;
+  uint32 conn_id = 3;   // identifies this session on UDP
+  fixed64 udp_key = 4;  // shared secret for UDP packets
+  PlayerInfo you = 5;
+  repeated PlayerInfo players = 6;
+  repeated ObjectInfo objects = 7;
+  uint32 tick_rate = 8;
+}
+
+message RoomLeft {
+  string reason = 1;
+}
+
+message PlayerJoined {
+  PlayerInfo player = 1;
+}
+
+message PlayerLeft {
+  uint64 user_id = 1;
+}
+
+message PlayerUpdated {
+  PlayerInfo player = 1;
+}
+
+message ObjectSpawned {
+  ObjectInfo object = 1;
+}
+
+message ObjectDespawned {
+  uint64 id = 1;
+  bool destroyed = 2;
+}
+
+message OwnershipChanged {
+  uint64 id = 1;
+  uint64 owner = 2;
+  uint32 epoch = 3;
+  ObjectState last_state = 4;
+  repeated uint64 seats = 5;
+}
+
+message ChatMsg {
+  uint64 from = 1;
+  string from_name = 2;
+  string text = 3;
+  bool system = 4;
+}
+
+message HitReceived {
+  uint64 from = 1;
+  uint64 target_id = 2;
+  float damage = 3;
+  string weapon = 4;
+  Vec3 point = 5;
+}
+
+message KillFeed {
+  uint64 killer = 1;
+  uint64 victim = 2;
+  string weapon = 3;
+}
+
+// Cash/xp the client must add to its own economy (kill reward, admin grant).
+message Reward {
+  int64 cash = 1;
+  int64 xp = 2;
+  string reason = 3;
+}
+
+// Admin overwrote this client's progress (set rank, reset player).
+message ProgressOverride {
+  Progress progress = 1;
+  string reason = 2;
+}
+
+message SettingsUpdated {
+  RoomSettings settings = 1;
+}
+
+message HostChanged {
+  uint64 host_id = 1;
+}
+
+message Pong {
+  int64 client_time_ms = 1;
+  int64 server_time_ms = 2;
+}
+
+message EventEntry {
+  int64 time_ms = 1;
+  uint64 actor_id = 2;
+  string actor_name = 3;
+  string action = 4;
+  uint64 target_id = 5;
+  string detail = 6;
+}
+
+message EventLog {
+  repeated EventEntry events = 1;
+}
+
+message ServerMsg {
+  oneof msg {
+    AuthOk auth_ok = 1;
+    Error error = 2;
+    RoomList room_list = 3;
+    RoomJoined room_joined = 4;
+    RoomLeft room_left = 5;
+    PlayerJoined player_joined = 6;
+    PlayerLeft player_left = 7;
+    PlayerUpdated player_updated = 8;
+    ObjectSpawned object_spawned = 9;
+    ObjectDespawned object_despawned = 10;
+    OwnershipChanged ownership = 11;
+    ChatMsg chat = 12;
+    HitReceived hit = 13;
+    KillFeed kill = 14;
+    Reward reward = 15;
+    ProgressOverride progress_override = 16;
+    SettingsUpdated settings = 17;
+    HostChanged host_changed = 18;
+    Pong pong = 19;
+    EventLog event_log = 20;
+  }
+}
+
+// ---------- UDP 4003 ----------
+
+message ObjectUpdate {
+  uint64 id = 1;
+  uint32 epoch = 2;
+  ObjectState state = 3;
+}
+
+message ProjectileFired {
+  uint64 shooter = 1; // user id, filled by server
+  string weapon = 2;
+  Vec3 origin = 3;
+  Vec3 dir = 4;
+  uint32 seed = 5;
+}
+
+message UdpPacket {
+  uint32 conn_id = 1; // 0 when sent by the server
+  fixed64 key = 2;    // 0 when sent by the server
+  uint32 seq = 3;
+  uint32 tick = 4;
+  repeated ObjectUpdate updates = 5;
+  repeated ProjectileFired shots = 6;
+  bool hello = 7; // registers the sender address for this conn_id
+}

@@ -1,0 +1,27 @@
+{
+  "name": "Saltmarsh Island",
+  "half_size": 340,
+  "plots": { "count": 8, "radius": 235, "size": 72 },
+  "statics": [
+    { "name": "radio_tower",   "min": [-3, 0, -3],      "max": [3, 26, 3] },
+    { "name": "bunker_n",      "min": [-14, 0, 22],     "max": [14, 4, 30] },
+    { "name": "bunker_s",      "min": [-14, 0, -30],    "max": [14, 4, -22] },
+    { "name": "wall_e",        "min": [24, 0, -10],     "max": [27, 3, 10] },
+    { "name": "wall_w",        "min": [-27, 0, -10],    "max": [-24, 3, 10] },
+    { "name": "town_hall",     "min": [80, 0, 80],      "max": [104, 12, 98] },
+    { "name": "town_house_a",  "min": [116, 0, 78],     "max": [128, 8, 90] },
+    { "name": "town_house_b",  "min": [74, 0, 112],     "max": [86, 7, 124] },
+    { "name": "town_house_c",  "min": [112, 0, 110],    "max": [126, 9, 122] },
+    { "name": "town_church",   "min": [94, 0, 132],     "max": [104, 18, 146] },
+    { "name": "hangar",        "min": [-130, 0, -120],  "max": [-96, 14, -92] },
+    { "name": "control_tower", "min": [-88, 0, -86],    "max": [-82, 20, -80] },
+    { "name": "quarry_rock_a", "min": [96, 0, -140],    "max": [124, 10, -112] },
+    { "name": "quarry_rock_b", "min": [130, 0, -110],   "max": [146, 7, -94] },
+    { "name": "quarry_rock_c", "min": [84, 0, -96],     "max": [98, 5, -84] },
+    { "name": "forest_rock_a", "min": [-124, 0, 96],    "max": [-110, 6, 110] },
+    { "name": "forest_rock_b", "min": [-92, 0, 130],    "max": [-80, 4, 140] },
+    { "name": "forest_cabin",  "min": [-106, 0, 116],   "max": [-96, 6, 124] }
+  ],
+  "runway": { "min": [-160, 0, -70], "max": [-140, 0.05, 90] },
+  "trees": { "center": [-105, 0, 115], "radius": 55, "count": 70, "seed": 7 }
+}

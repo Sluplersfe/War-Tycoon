@@ -1,0 +1,42 @@
+name: frontline
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: frontline
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: frontline
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U frontline -d frontline"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # Not published: only the server container can reach it.
+
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://frontline:${POSTGRES_PASSWORD}@db:5432/frontline?sslmode=disable
+      FF_TICK_RATE: ${FF_TICK_RATE:-20}
+    ports:
+      - "4002:4002/tcp"
+      - "4003:4003/udp"
+    healthcheck:
+      test: ["CMD", "/app/server", "-healthcheck"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    stop_grace_period: 30s
+
+volumes:
+  pgdata:

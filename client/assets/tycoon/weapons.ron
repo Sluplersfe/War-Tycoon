@@ -1,0 +1,18 @@
+// Weapon definitions. Damage is per hit (per pellet for shotguns). Fire rate
+// is shots per second. Spread is the cone half-angle in radians.
+[
+    (id: "knife", name: "Utility Knife", slot: 0, kind: Melee(range: 2.6), damage: 45.0, rate: 1.6, mag: 0, reload: 0.0, auto: false),
+    (id: "pistol", name: "Sidearm", slot: 1, kind: Hitscan(range: 120.0, spread: 0.012, pellets: 1), damage: 18.0, rate: 4.0, mag: 12, reload: 1.2, auto: false),
+    (id: "rifle", name: "Service Rifle", slot: 2, kind: Hitscan(range: 220.0, spread: 0.016, pellets: 1), damage: 22.0, rate: 9.0, mag: 30, reload: 2.0, auto: true),
+    (id: "smg", name: "Compact SMG", slot: 2, kind: Hitscan(range: 90.0, spread: 0.035, pellets: 1), damage: 14.0, rate: 14.0, mag: 35, reload: 1.8, auto: true),
+    (id: "shotgun", name: "Scattergun", slot: 2, kind: Hitscan(range: 40.0, spread: 0.085, pellets: 8), damage: 12.0, rate: 1.2, mag: 6, reload: 2.5, auto: false),
+    (id: "sniper", name: "Marksman", slot: 3, kind: Hitscan(range: 600.0, spread: 0.0, pellets: 1), damage: 95.0, rate: 0.8, mag: 5, reload: 2.8, auto: false),
+    (id: "rocket", name: "Tube Launcher", slot: 4, kind: Projectile(speed: 70.0, gravity: 2.0, splash: 6.0), damage: 220.0, rate: 0.5, mag: 1, reload: 3.0, auto: false),
+    (id: "grenade", name: "Frag Canister", slot: 5, kind: Projectile(speed: 22.0, gravity: 9.8, splash: 7.0), damage: 150.0, rate: 1.0, mag: 2, reload: 0.0, auto: false),
+
+    // Vehicle-mounted.
+    (id: "tank_cannon", name: "Tank Cannon", slot: 9, kind: Projectile(speed: 140.0, gravity: 3.0, splash: 5.0), damage: 420.0, rate: 0.4, mag: 1, reload: 2.5, auto: false),
+    (id: "mounted_gun", name: "Mounted Gun", slot: 9, kind: Hitscan(range: 250.0, spread: 0.02, pellets: 1), damage: 16.0, rate: 10.0, mag: 120, reload: 3.0, auto: true),
+    (id: "plane_gun", name: "Wing Guns", slot: 9, kind: Hitscan(range: 300.0, spread: 0.025, pellets: 1), damage: 20.0, rate: 12.0, mag: 200, reload: 4.0, auto: true),
+    (id: "turret", name: "Auto Turret", slot: 9, kind: Hitscan(range: 45.0, spread: 0.0, pellets: 1), damage: 8.0, rate: 2.0, mag: 0, reload: 0.0, auto: true),
+]
