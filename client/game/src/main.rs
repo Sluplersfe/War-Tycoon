@@ -8,6 +8,7 @@ mod gunsmith;
 mod net;
 mod objects;
 mod player;
+mod render;
 mod settings;
 mod state;
 mod tycoon;
@@ -92,7 +93,7 @@ fn main() {
         app.insert_resource(auto).add_systems(Update, autotest::run);
     }
 
-    app.add_systems(Startup, (art::setup_art, world::setup_camera, world::spawn_world).chain());
+    app.add_systems(Startup, (art::setup_art, world::setup_camera, render::setup_blit, world::spawn_world).chain());
 
     app.add_systems(
         Update,
@@ -102,6 +103,7 @@ fn main() {
             state::handle_session_messages,
             art::spin_parts,
             settings::apply_settings,
+            render::apply_render_scale,
             world::menu_camera.run_if(not(in_state(AppState::InGame))),
         )
             .chain(),

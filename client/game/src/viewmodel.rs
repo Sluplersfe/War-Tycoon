@@ -8,7 +8,7 @@ use std::f32::consts::{FRAC_PI_2, PI};
 use bevy::camera::visibility::RenderLayers;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
-use bevy_egui::{EguiGlobalSettings, PrimaryEguiContext};
+use bevy_egui::EguiGlobalSettings;
 
 use crate::combat::{CombatFx, Fx, Loadout};
 use crate::guns::{AnimKind, Armory, GunAnim, GunInfo, GunKit, Role, VM_LAYER};
@@ -68,7 +68,6 @@ pub fn spawn_camera(commands: &mut Commands, main: Entity, egui: &mut EguiGlobal
             Projection::Perspective(PerspectiveProjection { fov: VM_FOV.to_radians(), near: 0.01, far: 20.0, ..default() }),
             RenderLayers::layer(VM_LAYER),
             ViewModelCam,
-            PrimaryEguiContext,
         ))
         .id();
     commands.entity(main).add_child(cam);
