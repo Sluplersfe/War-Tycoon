@@ -34,6 +34,7 @@ pub struct UiState {
     pub rank_pick: u32,
     pub settings: Option<pb::RoomSettings>,
     pub styled: bool,
+    pub challenges: bool,
 }
 
 /// 0xRRGGBB of a colour.
@@ -504,8 +505,13 @@ pub fn ui_input(
     if seat.0.is_some() {
         gunsmith.open = false;
     }
+    if keys.just_pressed(KeyCode::KeyJ) && !ui.chat_open && !ui.pause {
+        ui.challenges = !ui.challenges;
+    }
     if keys.just_pressed(KeyCode::Escape) {
-        if gunsmith.open {
+        if ui.challenges {
+            ui.challenges = false;
+        } else if gunsmith.open {
             gunsmith.open = false;
         } else if settings_ui.open {
             settings_ui.open = false;
@@ -524,7 +530,7 @@ pub fn ui_input(
     if keys.just_pressed(KeyCode::F1) && room.is_host() {
         ui.admin_open = !ui.admin_open;
     }
-    controls.ui_wants_cursor = ui.pause || ui.chat_open || ui.admin_open || settings_ui.open || gunsmith.open;
+    controls.ui_wants_cursor = ui.pause || ui.chat_open || ui.admin_open || settings_ui.open || gunsmith.open || ui.challenges;
 }
 
 fn bar(p: &egui::Painter, rect: egui::Rect, frac: f32, fill: Color32) {
@@ -555,12 +561,14 @@ pub fn hud(
     cam: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     pads: Query<(&BuyPad, &GlobalTransform)>,
     avatars: Query<(&NetObject, &GlobalTransform), With<RemoteAvatar>>,
+    flags: Query<(&NetObject, &GlobalTransform), With<crate::objects::Flag>>,
     vehicles: Query<(&NetObject, &VehicleBody, Option<&Velocity>, &Interp)>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let now = time.elapsed_secs_f64();
     let screen = ctx.content_rect();
     let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("hud")));
+    let cam_pos_early = cam.single().map(|c| c.1.translation()).unwrap_or_default();
     let font = |s: f32| FontId::proportional(s);
     let shadow = |p: &egui::Painter, pos: egui::Pos2, a: Align2, text: String, size: f32, color: Color32| {
         p.text(pos + egui::vec2(1.5, 1.5), a, &text, font(size), Color32::from_black_alpha(200));
@@ -609,9 +617,64 @@ pub fn hud(
     }
     let hit = (1.0 - (now - fx.hit_at) / 0.25).clamp(0.0, 1.0) as f32;
     if hit > 0.0 {
-        let col = Color32::from_rgba_unmultiplied(255, 70, 60, (hit * 255.0) as u8);
+        let head = now - fx.head_at < 0.25;
+        let (r, g, b) = if head { (255, 205, 40) } else { (255, 70, 60) };
+        let col = Color32::from_rgba_unmultiplied(r, g, b, (hit * 255.0) as u8);
         for (dx, dy) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
             p.line_segment([c + egui::vec2(dx * 6.0, dy * 6.0), c + egui::vec2(dx * 13.0, dy * 13.0)], egui::Stroke::new(2.5, col));
+        }
+    }
+
+    // Floating damage numbers.
+    for (t, pos, amount, head) in &fx.nums {
+        let age = (now - t) as f32;
+        if age > 1.0 {
+            continue;
+        }
+        if let Some(sp) = world_to_screen(&cam, *pos + Vec3::Y * age * 1.2) {
+            let a = ((1.0 - age) * 255.0) as u8;
+            let col = if *head { Color32::from_rgba_unmultiplied(255, 210, 40, a) } else { Color32::from_rgba_unmultiplied(255, 255, 255, a) };
+            let size = if *head { 24.0 } else { 18.0 };
+            p.text(sp + egui::vec2(1.0, 1.0), Align2::CENTER_CENTER, format!("{:.0}", amount), font(size), Color32::from_black_alpha(a));
+            p.text(sp, Align2::CENTER_CENTER, format!("{:.0}", amount), font(size), col);
+        }
+    }
+    if let Some((t, text)) = &feed.banner {
+        let age = (now - t) as f32;
+        if age < 2.2 {
+            let a = ((2.2 - age).min(0.6) / 0.6 * 255.0) as u8;
+            let pos = egui::pos2(screen.center().x, screen.center().y - 130.0 - age * 6.0);
+            p.text(pos + egui::vec2(2.0, 2.0), Align2::CENTER_CENTER, text, font(30.0), Color32::from_black_alpha(a));
+            p.text(pos, Align2::CENTER_CENTER, text, font(30.0), Color32::from_rgba_unmultiplied(255, 90, 70, a));
+        }
+    }
+
+    // Capture points: strip at the top plus a progress bar while standing on one.
+    let mut flag_list: Vec<_> = flags.iter().collect();
+    flag_list.sort_by_key(|(o, _)| o.extra.get(3).copied().unwrap_or(0.0) as i32);
+    let n = flag_list.len() as f32;
+    for (i, (obj, gt)) in flag_list.iter().enumerate() {
+        let owner = obj.extra.first().copied().unwrap_or(-1.0);
+        let prog = obj.extra.get(1).copied().unwrap_or(0.0) / 100.0;
+        let idx = obj.extra.get(3).copied().unwrap_or(0.0) as usize % crate::objects::FLAG_NAMES.len();
+        let x = screen.center().x + (i as f32 - (n - 1.0) / 2.0) * 44.0;
+        let col = if owner >= 0.0 { c32(room.team_color(owner as u32)) } else { Color32::GRAY };
+        let rect = egui::Rect::from_center_size(egui::pos2(x, 22.0), egui::vec2(34.0, 22.0));
+        p.rect_filled(rect, 4.0, Color32::from_black_alpha(150));
+        let mut fill = rect.shrink(3.0);
+        fill.set_width(fill.width() * prog.clamp(0.0, 1.0));
+        p.rect_filled(fill, 2.0, col);
+        p.text(rect.center(), Align2::CENTER_CENTER, ["R", "T", "A", "Q", "F"][idx], font(12.0), Color32::WHITE);
+        let pos = gt.translation();
+        if pos.distance(cam_pos_early) < 260.0 {
+            if let Some(sp) = world_to_screen(&cam, pos + Vec3::Y * 8.0) {
+                shadow(&p, sp, Align2::CENTER_BOTTOM, crate::objects::FLAG_NAMES[idx].to_string(), 14.0, col);
+            }
+        }
+        if pos.distance(cam_pos_early) < crate::objects::FLAG_RADIUS {
+            let r = egui::Rect::from_center_size(egui::pos2(screen.center().x, 56.0), egui::vec2(260.0, 14.0));
+            bar(&p, r, prog, col);
+            shadow(&p, r.center_top() - egui::vec2(0.0, 2.0), Align2::CENTER_BOTTOM, format!("{} — hold to capture", crate::objects::FLAG_NAMES[idx]), 13.0, Color32::WHITE);
         }
     }
 
@@ -626,6 +689,10 @@ pub fn hud(
             continue;
         }
         if let Some(sp) = world_to_screen(&cam, pos) {
+            if obj.def == "bot" {
+                shadow(&p, sp, Align2::CENTER_BOTTOM, "Raider".to_string(), 14.0, Color32::from_rgb(0xE0, 0x60, 0x50));
+                continue;
+            }
             let team = room.team_of(obj.owner).unwrap_or(0);
             shadow(&p, sp, Align2::CENTER_BOTTOM, room.name_of(obj.owner), 14.0, c32(room.team_color(team)));
         }
@@ -638,7 +705,8 @@ pub fn hud(
         }
         let Some(item) = data.catalog.get(&pad.item) else { continue };
         let Some(sp) = world_to_screen(&cam, pos + Vec3::Y * 1.6) else { continue };
-        let locked = econ.rank < item.rank;
+        let kills_gate = data.catalog.check_kills(&item.id, econ.kills).err();
+        let locked = econ.rank < item.rank || kills_gate.is_some();
         let color = if locked {
             RED
         } else if econ.cash < item.cost {
@@ -647,7 +715,9 @@ pub fn hud(
             GREEN
         };
         shadow(&p, sp, Align2::CENTER_BOTTOM, item.name.clone(), 15.0, Color32::WHITE);
-        let sub = if locked {
+        let sub = if let Some(g) = kills_gate {
+            g.to_string()
+        } else if locked {
             format!("requires {}", ranks::name(item.rank))
         } else if item.cost == 0 {
             "free".to_string()
@@ -1043,4 +1113,68 @@ pub fn admin_panel(
         ui_state.admin_open = false;
     }
     Ok(())
+}
+
+/// Weapon mastery and kill-gated unlocks (J).
+pub fn challenges_ui(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, data: Res<GameData>, econ: Res<Economy>) -> Result {
+    if !ui_state.challenges {
+        return Ok(());
+    }
+    let ctx = contexts.ctx_mut()?;
+    let mut close = false;
+    egui::Window::new("challenges")
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+        .fixed_size([520.0, 0.0])
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| ui.label(RichText::new("CHALLENGES").size(24.0).color(AMBER).strong()));
+            ui.label(RichText::new(format!("{} kills in this room", econ.kills)).color(Color32::GRAY));
+            ui.add_space(6.0);
+            ui.label(RichText::new("WEAPON MASTERY").size(12.0).color(Color32::from_rgb(0xA8, 0xA0, 0x80)).strong());
+            ui.separator();
+            egui::Grid::new("mastery").num_columns(3).spacing([14.0, 6.0]).show(ui, |ui| {
+                for w in data.weapons.iter().filter(|w| !matches!(w.id.as_str(), "tank_cannon" | "mounted_gun" | "plane_gun")) {
+                    let kills = econ.base.weapon_kills.get(&w.id).copied().unwrap_or(0);
+                    let tier = ranks_done(kills);
+                    ui.label(&w.name);
+                    let next = frontline_sim::tycoon::MASTERY.get(tier).map(|m| m.0);
+                    let frac = next.map(|n| kills as f32 / n as f32).unwrap_or(1.0);
+                    ui.add(egui::ProgressBar::new(frac).desired_width(220.0).text(match next {
+                        Some(n) => format!("{kills} / {n}"),
+                        None => format!("{kills}  ·  mastered"),
+                    }));
+                    ui.label(RichText::new(["—", "I", "II", "III"][tier]).color(AMBER).strong());
+                    ui.end_row();
+                }
+            });
+            ui.add_space(10.0);
+            ui.label(RichText::new("EARNED UNLOCKS").size(12.0).color(Color32::from_rgb(0xA8, 0xA0, 0x80)).strong());
+            ui.separator();
+            for item in data.catalog.items.iter().filter(|i| data.catalog.kills_required(&i.id) > 0) {
+                let need = data.catalog.kills_required(&item.id);
+                let ok = econ.kills >= need as i64;
+                ui.horizontal(|ui| {
+                    ui.label(if ok { "✔" } else { "🔒" });
+                    ui.label(&item.name);
+                    ui.label(RichText::new(format!("{need} kills")).color(if ok { GREEN } else { Color32::GRAY }));
+                });
+            }
+            ui.add_space(10.0);
+            ui.vertical_centered(|ui| {
+                if primary_button(ui, "Close", 140.0).clicked() {
+                    close = true;
+                }
+            });
+        });
+    if close {
+        ui_state.challenges = false;
+    }
+    Ok(())
+}
+
+fn ranks_done(kills: u32) -> usize {
+    frontline_sim::tycoon::MASTERY.iter().filter(|m| kills >= m.0).count()
 }

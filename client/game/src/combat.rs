@@ -15,6 +15,7 @@ use frontline_sim::defs::VehicleClass;
 use frontline_sim::weapons::{WeaponDef, WeaponKind, WeaponState, splash_damage};
 
 use crate::art::{Build, pal};
+use crate::audio::{Play, Snd};
 use crate::net::{Inbound, Net, UdpIn};
 use crate::objects::{Explosion, NetObject, NetObjects, OutShots, VehicleBody, pv, v3};
 use crate::guns::{self, Armory, Handling};
@@ -163,8 +164,12 @@ pub struct CombatFx {
     /// When the local player last fired a hand weapon (drives the view model).
     pub fired_at: f64,
     pub hit_at: f64,
+    /// Last time a hit was a headshot (the hit marker turns gold).
+    pub head_at: f64,
     pub hurt_at: f64,
     pub hurt_from: Option<Vec3>,
+    /// Floating damage numbers: (spawned, world position, amount, headshot).
+    pub nums: Vec<(f64, Vec3, f32, bool)>,
 }
 
 /// Short-lived effect entity: despawns after `life`, scaling by `grow` per second.
@@ -213,6 +218,7 @@ pub fn select_weapon(
     seat: Res<Seat>,
     data: Res<GameData>,
     mut loadout: ResMut<Loadout>,
+    mut play: MessageWriter<Play>,
 ) {
     if !controls.captured {
         return;
@@ -242,7 +248,11 @@ pub fn select_weapon(
     if keys.just_pressed(KeyCode::KeyR) && mounted_weapon(&seat).is_none() {
         let id = loadout.current_id().to_string();
         if let Some((def, st)) = loadout.state_mut(&data, &id, false) {
+            let was = st.reloading > 0.0;
             st.start_reload(def);
+            if !was && st.reloading > 0.0 {
+                play.write(Play::ui(Snd::Reload));
+            }
         }
     }
 }
@@ -270,7 +280,7 @@ pub fn target_hit(obj: &NetObject, t: &Transform, point: Vec3, room: &Room) -> O
             Some(if head { 1.5 } else { 1.0 })
         }
         ObjectKind::Vehicle | ObjectKind::Prop => {
-            if obj.spawned_by == room.me || (obj.spawned_by != 0 && !room.is_enemy(obj.spawned_by)) {
+            if obj.def == "flag" || obj.spawned_by == room.me || (obj.spawned_by != 0 && !room.is_enemy(obj.spawned_by)) {
                 return None;
             }
             Some(1.0)
@@ -337,6 +347,7 @@ pub fn fire(
     me: Query<Entity, With<LocalPlayer>>,
     vehicles: Query<(&Transform, &NetObject), With<VehicleBody>>,
     targets: Query<(&NetObject, &Transform), Without<MainCamera>>,
+    mut play: MessageWriter<Play>,
 ) {
     if !controls.captured || !vitals.alive() {
         return;
@@ -356,6 +367,7 @@ pub fn fire(
         return;
     }
     let def = def.clone();
+    play.write(Play::ui(Snd::shot(&wid)));
 
     let now = time.elapsed_secs_f64();
     let mut exclude_filter = QueryFilter::default().exclude_collider(pe).exclude_sensors();
@@ -410,15 +422,16 @@ pub fn fire(
     let spread_mult = handling.hip + (0.3 - handling.hip) * ads;
     let extra_spread = if on_foot && wid == "sniper" { 0.06 * (1.0 - ads) } else { 0.0 };
 
-    let mut damage_by_target: HashMap<u64, (f32, Vec3)> = HashMap::new();
+    let mut damage_by_target: HashMap<u64, (f32, Vec3, bool)> = HashMap::new();
     match def.kind {
         WeaponKind::Melee { range } => {
             if let Some((e, toi)) = ctx.cast_ray(muzzle, dir, range, true, exclude_filter) {
                 let point = muzzle + dir * toi;
                 if let Ok((obj, t)) = targets.get(e) {
                     if let Some(mult) = target_hit(obj, t, point, &room) {
-                        let entry = damage_by_target.entry(obj.id).or_insert((0.0, point));
+                        let entry = damage_by_target.entry(obj.id).or_insert((0.0, point, false));
                         entry.0 += def.damage * mult;
+                        entry.2 |= mult > 1.0;
                     }
                 }
             }
@@ -433,8 +446,9 @@ pub fn fire(
                     match targets.get(e) {
                         Ok((obj, t)) => {
                             if let Some(mult) = target_hit(obj, t, end, &room) {
-                                let entry = damage_by_target.entry(obj.id).or_insert((0.0, end));
+                                let entry = damage_by_target.entry(obj.id).or_insert((0.0, end, false));
                                 entry.0 += def.damage * mult;
+                                entry.2 |= mult > 1.0;
                             }
                         }
                         Err(_) => spawn_spark(&mut b, end),
@@ -455,9 +469,15 @@ pub fn fire(
         look.pitch = (look.pitch + kick).min(1.3);
         look.yaw += (rand::random::<f32>() - 0.5) * kick * 0.6;
     }
-    for (id, (damage, point)) in damage_by_target {
+    for (id, (damage, point, head)) in damage_by_target {
         net.send(C::Hit(pb::HitReport { target_id: id, damage, weapon: wid.clone(), point: pv(point) }));
         fx.hit_at = now;
+        if head {
+            fx.head_at = now;
+        }
+        fx.nums.retain(|n| now - n.0 < 1.2);
+        fx.nums.push((now, point + Vec3::Y * 0.3, damage, head));
+        play.write(Play::ui(if head { Snd::Head } else { Snd::Hit }));
     }
 }
 
@@ -549,6 +569,7 @@ pub fn remote_shots(
     data: Res<GameData>,
     mut b: Build,
     rapier: ReadRapierContext,
+    mut play: MessageWriter<Play>,
 ) {
     let Ok(ctx) = rapier.single() else { return };
     for UdpIn(p) in packets.read() {
@@ -558,6 +579,7 @@ pub fn remote_shots(
             }
             let Some(def) = data.weapon(&s.weapon) else { continue };
             let origin = v3(&s.origin);
+            play.write(Play::at(Snd::shot(&s.weapon), origin, 1.2));
             let dir = v3(&s.dir).normalize_or_zero();
             if dir == Vec3::ZERO {
                 continue;
@@ -586,6 +608,7 @@ pub fn handle_hits(
     mut vitals: ResMut<Vitals>,
     mut fx: ResMut<CombatFx>,
     mut q: Query<(&mut NetObject, &Transform)>,
+    mut play: MessageWriter<Play>,
 ) {
     let now = time.elapsed_secs_f64();
     for Inbound(msg) in inbound.read() {
@@ -593,6 +616,7 @@ pub fn handle_hits(
         if h.target_id == room.avatar_id {
             if room.is_enemy(h.from) && vitals.damage(now, h.damage, h.from, &h.weapon) {
                 fx.hurt_at = now;
+                play.write(Play::ui(Snd::Hurt));
                 fx.hurt_from = h.point.as_ref().map(|p| Vec3::new(p.x, p.y, p.z));
             }
             continue;
@@ -609,8 +633,9 @@ pub fn handle_hits(
     }
 }
 
-pub fn spawn_explosions(mut events: MessageReader<Explosion>, mut b: Build) {
+pub fn spawn_explosions(mut events: MessageReader<Explosion>, mut b: Build, mut play: MessageWriter<Play>) {
     for ev in events.read() {
+        play.write(Play::at(Snd::Boom, ev.pos, (ev.radius / 4.0).clamp(0.6, 2.0)));
         let mat = b.glow(pal::HAZARD);
         let mesh = b.art.sphere.clone();
         let life = 0.45;

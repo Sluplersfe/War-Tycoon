@@ -434,7 +434,7 @@ pub fn pad_colors(
     let (green, amber, red) = (b.glow(GLOW_GREEN), b.glow(pal::AMBER), b.glow(GLOW_RED));
     for (pad, children) in &pads {
         let Some(item) = data.catalog.get(&pad.item) else { continue };
-        let want = if econ.rank < item.rank {
+        let want = if econ.rank < item.rank || data.catalog.check_kills(&item.id, econ.kills).is_err() {
             &red
         } else if econ.cash < item.cost {
             &amber
@@ -482,7 +482,9 @@ pub fn buy_on_pads(
         }
         let rank = econ.rank;
         let cash = econ.cash;
-        match data.catalog.buy(&pad.item, &mut econ.base.clone(), cash, rank) {
+        let gate = data.catalog.check_kills(&pad.item, econ.kills);
+        let attempt = gate.and_then(|_| data.catalog.buy(&pad.item, &mut econ.base.clone(), cash, rank));
+        match attempt {
             Ok(rest) => {
                 let cost = cash - rest;
                 let name = data.catalog.get(&pad.item).map(|i| i.name.clone()).unwrap_or_default();

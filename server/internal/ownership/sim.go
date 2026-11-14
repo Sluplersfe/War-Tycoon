@@ -24,7 +24,7 @@ const (
 func (r *Registry) Step(dt float32, abandonTTL time.Duration) (moved []*Object, despawned []uint64) {
 	now := r.now()
 	for id, o := range r.Objects {
-		if o.Owner != Server || o.Kind == pb.ObjectKind_OBJECT_KIND_PLAYER {
+		if o.Owner != Server || o.Static || o.Kind == pb.ObjectKind_OBJECT_KIND_PLAYER {
 			continue
 		}
 		if abandonTTL > 0 && !o.occupied() && now.Sub(o.Abandoned) > abandonTTL {

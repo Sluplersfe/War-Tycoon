@@ -201,6 +201,8 @@ pub struct Feed {
     pub chat: Vec<ChatLine>,
     pub kills: Vec<(f64, String)>,
     pub toasts: Vec<(f64, String)>,
+    /// Big centre-screen "ELIMINATED" banner: (when, text).
+    pub banner: Option<(f64, String)>,
 }
 
 impl Feed {
@@ -366,6 +368,7 @@ pub fn handle_room_messages(
     mut feed: ResMut<Feed>,
     data: Res<GameData>,
     time: Res<Time>,
+    mut play: MessageWriter<crate::audio::Play>,
 ) {
     let now = time.elapsed_secs_f64();
     for Inbound(msg) in inbound.read() {
@@ -402,8 +405,19 @@ pub fn handle_room_messages(
                 }
             }
             S::Kill(k) => {
-                let victim = room.name_of(k.victim);
+                let bot_kill = k.victim == 0 && k.killer != 0;
+                let victim = if bot_kill { "Raider".to_string() } else { room.name_of(k.victim) };
                 let weapon = data.weapon(&k.weapon).map(|w| w.name.clone()).unwrap_or_else(|| k.weapon.clone());
+                if k.killer == room.me && k.victim != room.me {
+                    feed.banner = Some((now, format!("ELIMINATED  {victim}")));
+                    play.write(crate::audio::Play::ui(crate::audio::Snd::Kill));
+                    for (tier, cash, xp) in frontline_sim::tycoon::record_kill(&mut econ.base, &k.weapon) {
+                        econ.cash += cash;
+                        econ.add_xp(xp);
+                        feed.toast(now, format!("{} mastery {}: +${cash}", weapon, ["I", "II", "III"][tier]));
+                    }
+                    econ.mark_dirty();
+                }
                 let line = if k.killer == 0 || k.killer == k.victim {
                     format!("{victim} died")
                 } else {

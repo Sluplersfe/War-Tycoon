@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 frontline-proto = { path = "../proto" }
 frontline-sim = { path = "../sim" }
-bevy = "0.20"
+bevy = { version = "0.20", features = ["wav"] }
 bevy_rapier3d = "0.37"
 bevy_egui = "0.43"
 prost.workspace = true

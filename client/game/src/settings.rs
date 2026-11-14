@@ -19,6 +19,8 @@ pub struct Settings {
     /// Vertical render resolution in pixels (0 = native, i.e. the window size).
     pub render_height: u32,
     pub vsync: bool,
+    /// Master volume, 0..=1.5.
+    pub volume: f32,
     /// 0 = off, 2 or 4 samples.
     pub msaa: u32,
     pub shadows: bool,
@@ -30,7 +32,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { sensitivity: 1.0, invert_y: false, fov: 70.0, fullscreen: false, render_height: 0, vsync: true, msaa: 4, shadows: true, draw_distance: 1.0, ui_scale: 1.0, show_fps: false }
+        Self { sensitivity: 1.0, invert_y: false, fov: 70.0, fullscreen: false, render_height: 0, vsync: true, volume: 0.7, msaa: 4, shadows: true, draw_distance: 1.0, ui_scale: 1.0, show_fps: false }
     }
 }
 
@@ -56,6 +58,7 @@ impl Settings {
         self.sensitivity = self.sensitivity.clamp(0.1, 4.0);
         self.fov = self.fov.clamp(50.0, 120.0);
         self.ui_scale = self.ui_scale.clamp(0.7, 2.0);
+        self.volume = self.volume.clamp(0.0, 1.5);
         self.draw_distance = self.draw_distance.clamp(0.3, 2.0);
         self.msaa = match self.msaa { 0 => 0, 2 => 2, _ => 4 };
         if self.render_height != 0 {
@@ -174,6 +177,9 @@ pub fn settings_window(
                 ui.end_row();
                 ui.label("VSync");
                 ui.checkbox(&mut s.vsync, "");
+                ui.end_row();
+                ui.label("Volume");
+                ui.add(egui::Slider::new(&mut s.volume, 0.0..=1.5).fixed_decimals(2));
                 ui.end_row();
                 ui.label("Show FPS");
                 ui.checkbox(&mut s.show_fps, "");

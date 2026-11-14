@@ -17,7 +17,7 @@ type AABB struct {
 }
 
 type Map struct {
-	Name     string `json:"name"`
+	Name     string  `json:"name"`
 	HalfSize float32 `json:"half_size"`
 	Plots    struct {
 		Count  int     `json:"count"`
@@ -97,4 +97,45 @@ func (w *World) Vehicle(def string) VehicleDef {
 		return v
 	}
 	return VehicleDef{Class: "prop", Seats: 0, HalfExtents: [3]float32{0.5, 0.5, 0.5}, Mass: 50, Health: 100}
+}
+
+// Open reports whether (x, z) is at least margin away from every static box.
+func (w *World) Open(x, z, margin float32) bool {
+	for _, b := range w.Map.Statics {
+		if x > b.Min[0]-margin && x < b.Max[0]+margin && z > b.Min[2]-margin && z < b.Max[2]+margin {
+			return false
+		}
+	}
+	return math.Abs(float64(x)) < float64(w.Map.HalfSize)-8 && math.Abs(float64(z)) < float64(w.Map.HalfSize)-8
+}
+
+// Blocked reports whether the segment a->b passes through a static box.
+func (w *World) Blocked(a, b [3]float32) bool {
+	for _, bx := range w.Map.Statics {
+		t0, t1 := float32(0), float32(1)
+		hit := true
+		for i := 0; i < 3; i++ {
+			d := b[i] - a[i]
+			if d > -1e-6 && d < 1e-6 {
+				if a[i] < bx.Min[i] || a[i] > bx.Max[i] {
+					hit = false
+					break
+				}
+				continue
+			}
+			ta, tb := (bx.Min[i]-a[i])/d, (bx.Max[i]-a[i])/d
+			if ta > tb {
+				ta, tb = tb, ta
+			}
+			t0, t1 = max(t0, ta), min(t1, tb)
+			if t0 > t1 {
+				hit = false
+				break
+			}
+		}
+		if hit {
+			return true
+		}
+	}
+	return false
 }

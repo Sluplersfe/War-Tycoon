@@ -43,6 +43,8 @@ type Object struct {
 	stillFor  float32
 	Abandoned time.Time // when it last became unoccupied and server-owned
 	Dirty     bool      // state changed since last broadcast
+	// Static objects (capture flags) are server-driven and never integrated, abandoned or saved.
+	Static bool
 }
 
 func (o *Object) Info() *pb.ObjectInfo {

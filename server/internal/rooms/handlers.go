@@ -234,7 +234,27 @@ func (r *Room) hit(c *conn, h *pb.HitReport) {
 		return
 	}
 	// Unowned: the server applies damage itself.
+	if o.Static {
+		return // capture flags can't be shot down
+	}
 	o.State.Health -= dmg
+	if o.Def == "bot" {
+		if o.State.Health <= 0 {
+			r.reg.Despawn(o.ID)
+			r.botKilled(o.ID)
+			r.broadcast(&pb.ServerMsg{Msg: &pb.ServerMsg_ObjectDespawned{ObjectDespawned: &pb.ObjectDespawned{Id: o.ID, Destroyed: true}}}, 0)
+			r.broadcast(&pb.ServerMsg{Msg: &pb.ServerMsg_Kill{Kill: &pb.KillFeed{Killer: uid, Victim: 0, Weapon: h.Weapon}}}, 0)
+			if k := r.players[uid]; k != nil {
+				k.Kills++
+				k.dirty = true
+				r.playerUpdated(k)
+			}
+			c.peer.Send(&pb.ServerMsg{Msg: &pb.ServerMsg_Reward{Reward: &pb.Reward{
+				Cash: int64(float32(r.settings.KillReward) * r.settings.CashMultiplier / 2), Xp: 25, Reason: "Raider down",
+			}}})
+		}
+		return
+	}
 	o.Asleep = false
 	if o.State.Health <= 0 {
 		r.reg.Despawn(o.ID)

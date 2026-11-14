@@ -42,6 +42,18 @@ pub struct Interp(pub Buffer);
 #[derive(Component)]
 pub struct RemoteAvatar;
 
+/// A capture point: a pole with a banner that rises as the holding team's progress grows.
+#[derive(Component)]
+pub struct Flag {
+    banner: Entity,
+    material: Handle<StandardMaterial>,
+    owner: i32,
+}
+
+/// Names of the capture sites, in the order the server lays them out.
+pub const FLAG_NAMES: [&str; 5] = ["Radio Tower", "Town", "Airfield", "Quarry", "Forest"];
+pub const FLAG_RADIUS: f32 = 14.0;
+
 #[derive(Component)]
 pub struct VehicleBody {
     pub class: frontline_sim::defs::VehicleClass,
@@ -127,10 +139,35 @@ pub fn spawn_object(b: &mut Build, data: &GameData, room: &Room, info: &pb::Obje
         ))
         .id();
 
+    if info.def == "flag" {
+        let material = b.materials.add(StandardMaterial { base_color: Color::srgb(0.75, 0.75, 0.75), perceptual_roughness: 0.8, ..default() });
+        b.cyl(e, pal::CONCRETE_DARK, Vec3::new(0.0, 3.6, 0.0), 0.12, 7.2, Quat::IDENTITY);
+        b.sphere(e, pal::HAZARD, Vec3::new(0.0, 7.3, 0.0), 0.22);
+        b.cyl(e, pal::CONCRETE, Vec3::new(0.0, 0.15, 0.0), 1.2, 0.3, Quat::IDENTITY);
+        let banner = b.boxm(e, material.clone(), Vec3::new(0.9, 1.5, 0.0), Vec3::new(1.8, 1.1, 0.06));
+        let ring = b.mat_kind(pal::HAZARD, 2);
+        let mesh = b.art.cylinder.clone();
+        let r = b
+            .commands
+            .spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(ring),
+                Transform::from_xyz(0.0, 0.05, 0.0).with_scale(Vec3::new(FLAG_RADIUS * 2.0, 0.06, FLAG_RADIUS * 2.0)),
+                bevy::light::NotShadowCaster,
+            ))
+            .id();
+        b.commands.entity(e).add_child(r);
+        b.commands.entity(e).insert(Flag { banner, material, owner: -9 });
+        return e;
+    }
     match kind {
         ObjectKind::Player => {
             let team = room.team_of(info.owner).unwrap_or(0);
-            let color = room.settings.teams.get(team as usize).map(|t| t.color).unwrap_or(pal::KHAKI);
+            let color = if info.def == "bot" {
+                0x8B2A2A
+            } else {
+                room.settings.teams.get(team as usize).map(|t| t.color).unwrap_or(pal::KHAKI)
+            };
             b.soldier(e, color);
             b.commands.entity(e).insert(crate::art::Gait::default());
             if local {
@@ -306,6 +343,47 @@ pub fn interpolate(room: Res<Room>, time: Res<Time>, mut q: Query<(&NetObject, &
         if let Some((p, r)) = interp.0.sample(now - interp.0.delay()) {
             tr.translation = p;
             tr.rotation = r;
+        }
+    }
+}
+
+/// Colours and raises each flag's banner from the server's capture state, and
+/// plays a chime when your team takes one.
+pub fn update_flags(
+    room: Res<Room>,
+    time: Res<Time>,
+    mut flags: Query<(&NetObject, &mut Flag)>,
+    mut banners: Query<&mut Transform>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+    mut play: MessageWriter<crate::audio::Play>,
+    mut feed: ResMut<crate::state::Feed>,
+) {
+    let now = time.elapsed_secs_f64();
+    for (obj, mut flag) in &mut flags {
+        let owner = obj.extra.first().copied().unwrap_or(-1.0) as i32;
+        let progress = obj.extra.get(1).copied().unwrap_or(0.0) / 100.0;
+        let contest = obj.extra.get(2).copied().unwrap_or(-1.0);
+        let color = if contest == -2.0 && (now * 5.0) as i64 % 2 == 0 {
+            Color::srgb(1.0, 0.7, 0.1)
+        } else if owner >= 0 {
+            room.team_color(owner as u32)
+        } else {
+            Color::srgb(0.75, 0.75, 0.75)
+        };
+        if let Some(mut m) = mats.get_mut(&flag.material) {
+            m.base_color = color;
+            m.emissive = color.to_linear() * 0.6;
+        }
+        if let Ok(mut t) = banners.get_mut(flag.banner) {
+            t.translation.y = 1.6 + 4.6 * progress.clamp(0.0, 1.0);
+        }
+        if flag.owner != owner {
+            if flag.owner != -9 && owner >= 0 && owner as u32 == room.my_team() {
+                let name = FLAG_NAMES[obj.extra.get(3).copied().unwrap_or(0.0) as usize % FLAG_NAMES.len()];
+                feed.toast(now, format!("Your team holds {name}"));
+                play.write(crate::audio::Play::ui(crate::audio::Snd::Capture));
+            }
+            flag.owner = owner;
         }
     }
 }

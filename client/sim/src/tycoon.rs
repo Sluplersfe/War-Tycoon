@@ -1,7 +1,7 @@
 //! Base items, purchases and rebirths. The client owns its economy; the server
 //! only stores the resulting `BaseState` JSON.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
@@ -65,6 +65,12 @@ pub struct Catalog {
 pub struct BaseState {
     #[serde(default)]
     pub owned: Vec<String>,
+    /// Kills per weapon id in this room, for mastery challenges.
+    #[serde(default)]
+    pub weapon_kills: BTreeMap<String, u32>,
+    /// Mastery rewards already paid out, as "weapon:tier".
+    #[serde(default)]
+    pub claimed: Vec<String>,
 }
 
 impl BaseState {
@@ -89,6 +95,7 @@ pub enum BuyError {
     Missing(String),
     Rank(u32),
     Cash(i64),
+    Kills(u32),
 }
 
 impl std::fmt::Display for BuyError {
@@ -99,6 +106,7 @@ impl std::fmt::Display for BuyError {
             BuyError::Missing(id) => write!(f, "requires {id}"),
             BuyError::Rank(r) => write!(f, "requires rank {}", crate::ranks::name(*r)),
             BuyError::Cash(short) => write!(f, "need ${short} more"),
+            BuyError::Kills(n) => write!(f, "needs {n} kills in this room"),
         }
     }
 }
@@ -135,6 +143,32 @@ impl Catalog {
             return Err(BuyError::Cash(item.cost - cash));
         }
         Ok(item)
+    }
+
+    /// Combat kills in the room needed before an item can be built: the heavier
+    /// weapons and vehicles are earned on the battlefield as well as bought.
+    pub fn kills_required(&self, id: &str) -> u32 {
+        match self.get(id).map(|i| &i.kind) {
+            Some(ItemKind::WeaponRack { weapon }) => match weapon.as_str() {
+                "shotgun" => 5,
+                "sniper" => 15,
+                "rocket" => 30,
+                _ => 0,
+            },
+            Some(ItemKind::VehiclePad { vehicle }) => match vehicle.as_str() {
+                "heli" => 25,
+                "tank" => 40,
+                "plane" => 60,
+                _ => 0,
+            },
+            _ => 0,
+        }
+    }
+
+    /// Fails if the player hasn't earned the item yet.
+    pub fn check_kills(&self, id: &str, kills: i64) -> Result<(), BuyError> {
+        let need = self.kills_required(id);
+        if kills < need as i64 { Err(BuyError::Kills(need)) } else { Ok(()) }
     }
 
     /// Validates and applies a purchase; returns the new cash.
@@ -194,6 +228,25 @@ impl Catalog {
     pub fn has_line(&self, base: &BaseState, line: usize) -> bool {
         self.owns_kind(base).any(|i| matches!(i.kind, ItemKind::Line { line: l } if l == line))
     }
+}
+
+/// Weapon mastery tiers: (kills with the weapon, cash, xp).
+pub const MASTERY: [(u32, i64, i64); 3] = [(10, 500, 150), (40, 2500, 600), (120, 10000, 2000)];
+
+/// Counts a kill with `weapon` and returns the (tier, cash, xp) of every tier it completes.
+pub fn record_kill(base: &mut BaseState, weapon: &str) -> Vec<(usize, i64, i64)> {
+    let n = base.weapon_kills.entry(weapon.to_string()).or_insert(0);
+    *n += 1;
+    let n = *n;
+    let mut done = Vec::new();
+    for (i, (need, cash, xp)) in MASTERY.iter().enumerate() {
+        let key = format!("{weapon}:{i}");
+        if n >= *need && !base.claimed.contains(&key) {
+            base.claimed.push(key);
+            done.push((i, *cash, *xp));
+        }
+    }
+    done
 }
 
 pub fn rebirth_price(rebirths: u32) -> i64 {
@@ -276,17 +329,17 @@ mod tests {
     #[test]
     fn sanitize_drops_orphans() {
         let c = Catalog::load();
-        let mut base = BaseState { owned: vec!["dropper_2".into(), "ghost".into(), "starter_line".into(), "dropper_1".into()] };
+        let mut base = BaseState { owned: vec!["dropper_2".into(), "ghost".into(), "starter_line".into(), "dropper_1".into()], ..Default::default() };
         c.sanitize(&mut base);
         assert_eq!(base.owned, vec!["starter_line", "dropper_1", "dropper_2"]);
-        let mut orphan = BaseState { owned: vec!["dropper_2".into()] };
+        let mut orphan = BaseState { owned: vec!["dropper_2".into()], ..Default::default() };
         c.sanitize(&mut orphan);
         assert!(orphan.owned.is_empty());
     }
 
     #[test]
     fn json_roundtrip() {
-        let b = BaseState { owned: vec!["a".into()] };
+        let b = BaseState { owned: vec!["a".into()], ..Default::default() };
         assert_eq!(BaseState::from_json(&b.to_json()), b);
         assert_eq!(BaseState::from_json("{}"), BaseState::default());
         assert_eq!(BaseState::from_json("garbage"), BaseState::default());
@@ -294,10 +347,31 @@ mod tests {
 
     #[test]
     fn rebirth() {
-        let base = BaseState { owned: vec!["hq".into()] };
+        let base = BaseState { owned: vec!["hq".into()], ..Default::default() };
         assert!(!can_rebirth(&base, 1000, 0));
         assert!(can_rebirth(&base, rebirth_price(0), 0));
         assert!(rebirth_price(1) > rebirth_price(0));
         assert_eq!(rebirth_multiplier(2), 1.5);
+    }
+
+    #[test]
+    fn mastery_pays_once_per_tier() {
+        let mut b = BaseState::default();
+        for _ in 0..9 {
+            assert!(record_kill(&mut b, "rifle").is_empty());
+        }
+        assert_eq!(record_kill(&mut b, "rifle").len(), 1);
+        assert!(record_kill(&mut b, "rifle").is_empty());
+        assert!(record_kill(&mut b, "smg").is_empty());
+        assert_eq!(BaseState::from_json(&b.to_json()), b);
+    }
+
+    #[test]
+    fn heavy_items_need_kills() {
+        let c = Catalog::load();
+        assert_eq!(c.kills_required("starter_line"), 0);
+        let tank = c.items.iter().find(|i| matches!(&i.kind, ItemKind::VehiclePad { vehicle } if vehicle == "tank")).unwrap();
+        assert_eq!(c.check_kills(&tank.id, 10), Err(BuyError::Kills(40)));
+        assert!(c.check_kills(&tank.id, 40).is_ok());
     }
 }

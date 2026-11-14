@@ -1,6 +1,7 @@
 //! Frontline Foundry client.
 
 mod art;
+mod audio;
 mod autotest;
 mod combat;
 mod guns;
@@ -55,7 +56,8 @@ fn main() {
     .add_plugins(EguiPlugin::default())
     .init_state::<AppState>();
 
-    app.add_message::<net::Inbound>()
+    app.add_message::<audio::Play>()
+        .add_message::<net::Inbound>()
         .add_message::<net::UdpIn>()
         .add_message::<net::Disconnected>()
         .add_message::<objects::Explosion>()
@@ -96,6 +98,8 @@ fn main() {
     }
 
     app.add_systems(Startup, (art::setup_art, world::setup_camera, render::setup_blit, world::spawn_world).chain());
+    app.add_systems(Startup, audio::setup_audio);
+    app.add_systems(Update, (audio::footsteps, audio::engine, objects::update_flags).run_if(in_game));
 
     app.add_systems(
         Update,
@@ -104,6 +108,9 @@ fn main() {
             state::on_disconnect,
             state::handle_session_messages,
             art::spin_parts,
+            audio::attach_listener,
+            audio::apply_volume,
+            audio::play_sounds,
             reconnect::drive,
             reconnect::replay_join,
             reconnect::restore,
@@ -206,8 +213,8 @@ fn main() {
             ui::menu_ui.run_if(in_state(AppState::Menu)),
             ui::login_ui.run_if(in_state(AppState::Login)),
             ui::lobby_ui.run_if(in_state(AppState::Lobby)),
-            (ui::hud, ui::scoreboard, ui::chat_input, ui::pause_menu, ui::admin_panel, gunsmith::gunsmith_ui).run_if(in_game),
-            (settings::settings_window, settings::fps_overlay, reconnect::overlay),
+            (ui::hud, ui::scoreboard, ui::chat_input, ui::pause_menu, ui::admin_panel, gunsmith::gunsmith_ui, ui::challenges_ui).run_if(in_game),
+            (settings::settings_window, settings::fps_overlay, reconnect::overlay, audio::ui_clicks),
         ),
     );
 

@@ -79,6 +79,8 @@ type Room struct {
 
 	saveMu sync.Mutex
 	stop   chan struct{}
+
+	arena *arena
 }
 
 func newRoom(m *Manager, row store.Room, s *pb.RoomSettings) *Room {
@@ -153,6 +155,7 @@ func (r *Room) join(ctx context.Context, p Peer) error {
 		}
 	}
 	r.plots[plot] = uid
+	r.arenaInit()
 	spawn := r.m.world.PlotSpawn(plot)
 	_, _, yaw := r.m.world.Plot(plot)
 	avatar := r.reg.Spawn(pb.ObjectKind_OBJECT_KIND_PLAYER, "soldier", uid, uid, &pb.ObjectState{
@@ -346,6 +349,7 @@ func (r *Room) step(dt float32) {
 		ttl = 0
 	}
 	moved, gone := r.reg.Step(dt, ttl)
+	moved = append(moved, r.stepArena(dt)...)
 	for _, id := range gone {
 		r.broadcast(&pb.ServerMsg{Msg: &pb.ServerMsg_ObjectDespawned{ObjectDespawned: &pb.ObjectDespawned{Id: id}}}, 0)
 	}
@@ -491,7 +495,7 @@ func (r *Room) snapshot() snapshot {
 	}
 	if s.persist {
 		for _, o := range r.reg.Objects {
-			if o.Kind == pb.ObjectKind_OBJECT_KIND_PLAYER {
+			if o.Kind == pb.ObjectKind_OBJECT_KIND_PLAYER || o.Static {
 				continue
 			}
 			b, err := protojson.Marshal(o.State)
