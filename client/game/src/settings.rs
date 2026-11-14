@@ -1,5 +1,7 @@
 //! Player preferences: stored in the config dir, applied to the window and camera.
 
+use std::collections::BTreeMap;
+
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PresentMode, PrimaryWindow, WindowMode};
 use bevy_egui::{EguiContexts, egui};
@@ -19,6 +21,11 @@ pub struct Settings {
     /// Vertical render resolution in pixels (0 = native, i.e. the window size).
     pub render_height: u32,
     pub vsync: bool,
+    /// Key bindings by action id (see `input::Act`); missing entries use the defaults.
+    pub keys: BTreeMap<String, String>,
+    /// Gamepad look sensitivity multiplier.
+    pub pad_sensitivity: f32,
+    pub tutorial_done: bool,
     /// Master volume, 0..=1.5.
     pub volume: f32,
     /// 0 = off, 2 or 4 samples.
@@ -32,11 +39,15 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { sensitivity: 1.0, invert_y: false, fov: 70.0, fullscreen: false, render_height: 0, vsync: true, volume: 0.7, msaa: 4, shadows: true, draw_distance: 1.0, ui_scale: 1.0, show_fps: false }
+        Self { sensitivity: 1.0, invert_y: false, fov: 70.0, fullscreen: false, render_height: 0, vsync: true, keys: BTreeMap::new(), pad_sensitivity: 1.0, tutorial_done: false, volume: 0.7, msaa: 4, shadows: true, draw_distance: 1.0, ui_scale: 1.0, show_fps: false }
     }
 }
 
 impl Settings {
+    pub fn key(&self, act: crate::input::Act) -> KeyCode {
+        self.keys.get(act.id()).and_then(|id| crate::input::key_from_id(id)).unwrap_or_else(|| act.default_key())
+    }
+
     fn path() -> Option<std::path::PathBuf> {
         Some(config_dir()?.join("settings.json"))
     }
@@ -59,6 +70,7 @@ impl Settings {
         self.fov = self.fov.clamp(50.0, 120.0);
         self.ui_scale = self.ui_scale.clamp(0.7, 2.0);
         self.volume = self.volume.clamp(0.0, 1.5);
+        self.pad_sensitivity = self.pad_sensitivity.clamp(0.3, 3.0);
         self.draw_distance = self.draw_distance.clamp(0.3, 2.0);
         self.msaa = match self.msaa { 0 => 0, 2 => 2, _ => 4 };
         if self.render_height != 0 {
@@ -72,6 +84,8 @@ impl Settings {
 #[derive(Resource, Default)]
 pub struct SettingsUi {
     pub open: bool,
+    /// The action waiting for a key press in the controls list.
+    pub rebinding: Option<crate::input::Act>,
 }
 
 /// Pushes changed settings to the window and writes them to disk once they settle.
@@ -140,6 +154,33 @@ pub fn settings_window(
                 ui.label("Invert Y axis");
                 ui.checkbox(&mut s.invert_y, "");
                 ui.end_row();
+                ui.label("Gamepad look speed");
+                ui.add(egui::Slider::new(&mut s.pad_sensitivity, 0.3..=3.0).fixed_decimals(2).suffix("×"));
+                ui.end_row();
+            });
+            ui.add_space(6.0);
+            egui::CollapsingHeader::new("Key bindings").default_open(false).show(ui, |ui| {
+                egui::Grid::new("set_keys").num_columns(2).spacing([16.0, 6.0]).show(ui, |ui| {
+                    for act in crate::input::ACTS {
+                        ui.label(act.label());
+                        let waiting = open.rebinding == Some(act);
+                        let text = if waiting { "press a key…".to_string() } else { crate::input::key_label(s.key(act)) };
+                        if ui.add_sized([130.0, 22.0], egui::Button::new(text).selected(waiting)).clicked() {
+                            open.rebinding = if waiting { None } else { Some(act) };
+                        }
+                        ui.end_row();
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui.small_button("Reset keys").clicked() {
+                        s.keys.clear();
+                        open.rebinding = None;
+                    }
+                    if ui.small_button("Show tutorial again").clicked() {
+                        s.tutorial_done = false;
+                    }
+                });
+                ui.label(RichText::new("Mouse: LMB fire, RMB aim, wheel switches weapons. Gamepad: sticks move/look, RT fire, LT aim, A jump, X reload, Y interact, B inspect, bumpers weapons, D-pad ↑ gunsmith, Start menu.").size(11.0).color(Color32::GRAY));
             });
             ui.add_space(10.0);
             section(ui, "Video");

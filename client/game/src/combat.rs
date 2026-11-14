@@ -16,6 +16,7 @@ use frontline_sim::weapons::{WeaponDef, WeaponKind, WeaponState, splash_damage};
 
 use crate::art::{Build, pal};
 use crate::audio::{Play, Snd};
+use crate::particles::{Burst, Emit};
 use crate::net::{Inbound, Net, UdpIn};
 use crate::objects::{Explosion, NetObject, NetObjects, OutShots, VehicleBody, pv, v3};
 use crate::guns::{self, Armory, Handling};
@@ -219,6 +220,7 @@ pub fn select_weapon(
     data: Res<GameData>,
     mut loadout: ResMut<Loadout>,
     mut play: MessageWriter<Play>,
+    actions: Res<crate::input::Actions>,
 ) {
     if !controls.captured {
         return;
@@ -240,12 +242,12 @@ pub fn select_weapon(
         }
     }
     let n = loadout.owned.len().max(1);
-    if scroll.delta.y > 0.0 {
+    if scroll.delta.y > 0.0 || actions.weapon_step < 0 {
         loadout.current = (loadout.current + n - 1) % n;
-    } else if scroll.delta.y < 0.0 {
+    } else if scroll.delta.y < 0.0 || actions.weapon_step > 0 {
         loadout.current = (loadout.current + 1) % n;
     }
-    if keys.just_pressed(KeyCode::KeyR) && mounted_weapon(&seat).is_none() {
+    if actions.reload_pressed && mounted_weapon(&seat).is_none() {
         let id = loadout.current_id().to_string();
         if let Some((def, st)) = loadout.state_mut(&data, &id, false) {
             let was = st.reloading > 0.0;
@@ -306,18 +308,6 @@ pub fn spawn_tracer(b: &mut Build, from: Vec3, to: Vec3) {
     ));
 }
 
-fn spawn_spark(b: &mut Build, at: Vec3) {
-    let mat = b.glow(pal::AMBER);
-    let mesh = b.art.sphere.clone();
-    b.commands.spawn((
-        Mesh3d(mesh),
-        MeshMaterial3d(mat),
-        Transform::from_translation(at).with_scale(Vec3::splat(0.25)),
-        Fx { life: 0.12, grow: Vec3::splat(-1.5) },
-        bevy::light::NotShadowCaster,
-    ));
-}
-
 fn spawn_projectile(b: &mut Build, at: Vec3, vel: Vec3, weapon: &str, mine: bool) {
     let big = weapon == "rocket" || weapon == "tank_cannon";
     let (color, size) = if weapon == "grenade" { (pal::OLIVE_DARK, 0.3) } else { (pal::HAZARD, if big { 0.45 } else { 0.3 }) };
@@ -335,8 +325,7 @@ fn spawn_projectile(b: &mut Build, at: Vec3, vel: Vec3, weapon: &str, mine: bool
 #[allow(clippy::too_many_arguments)]
 pub fn fire(
     time: Res<Time>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    (controls, vitals, seat, room, data, net, vm): (Res<Controls>, Res<Vitals>, Res<Seat>, Res<Room>, Res<GameData>, Res<Net>, Res<Vm>),
+    (controls, vitals, seat, room, data, net, vm, actions): (Res<Controls>, Res<Vitals>, Res<Seat>, Res<Room>, Res<GameData>, Res<Net>, Res<Vm>, Res<crate::input::Actions>),
     mut loadout: ResMut<Loadout>,
     mut look: ResMut<Look>,
     mut shots: ResMut<OutShots>,
@@ -348,6 +337,7 @@ pub fn fire(
     vehicles: Query<(&Transform, &NetObject), With<VehicleBody>>,
     targets: Query<(&NetObject, &Transform), Without<MainCamera>>,
     mut play: MessageWriter<Play>,
+    mut emit: MessageWriter<Emit>,
 ) {
     if !controls.captured || !vitals.alive() {
         return;
@@ -357,7 +347,7 @@ pub fn fire(
     let mounted = mounted_weapon(&seat);
     let wid = mounted.unwrap_or_else(|| loadout.current_id()).to_string();
     let Some(base) = data.weapon(&wid) else { return };
-    let wants = if base.auto { mouse.pressed(MouseButton::Left) } else { mouse.just_pressed(MouseButton::Left) };
+    let wants = if base.auto { actions.fire_held } else { actions.fire_pressed };
     if !wants {
         return;
     }
@@ -439,10 +429,12 @@ pub fn fire(
         WeaponKind::Hitscan { range, spread, pellets } => {
             for _ in 0..pellets.max(1) {
                 let d = random_cone(dir, spread * spread_mult + extra_spread);
-                let hit = ctx.cast_ray(muzzle, d, range, true, exclude_filter);
+                let hitn = ctx.cast_ray_and_get_normal(muzzle, d, range, true, exclude_filter);
+                let hit = hitn.map(|(e, ri)| (e, ri.time_of_impact));
                 let end = muzzle + d * hit.map(|h| h.1).unwrap_or(range.min(300.0));
                 spawn_tracer(&mut b, tracer_from, end);
                 if let Some((e, _)) = hit {
+                    let normal = hitn.map(|h| h.1.normal).unwrap_or(Vec3::Y);
                     match targets.get(e) {
                         Ok((obj, t)) => {
                             if let Some(mult) = target_hit(obj, t, end, &room) {
@@ -451,7 +443,11 @@ pub fn fire(
                                 entry.2 |= mult > 1.0;
                             }
                         }
-                        Err(_) => spawn_spark(&mut b, end),
+                        Err(_) => {
+                            for ev in Emit::impact(end, normal) {
+                                emit.write(ev);
+                            }
+                        }
                     }
                 }
             }
@@ -496,6 +492,7 @@ pub fn update_projectiles(
     me: Query<(Entity, &Transform), (With<LocalPlayer>, Without<Projectile>)>,
     targets: Query<(&NetObject, &Transform), Without<Projectile>>,
     mut boom: MessageWriter<Explosion>,
+    mut emit: MessageWriter<Emit>,
 ) {
     let Ok(ctx) = rapier.single() else { return };
     let dt = time.delta_secs().min(0.05);
@@ -512,6 +509,9 @@ pub fn update_projectiles(
             continue;
         };
         let from = t.translation;
+        if matches!(p.weapon.as_str(), "rocket" | "tank_cannon") && (p.life * 40.0) as i32 % 2 == 0 {
+            emit.write(Emit::new(Burst::Smoke, from, -p.vel.normalize_or_zero(), 1));
+        }
         p.vel.y -= gravity * dt;
         let step = p.vel * dt;
         let len = step.length();
@@ -570,6 +570,7 @@ pub fn remote_shots(
     mut b: Build,
     rapier: ReadRapierContext,
     mut play: MessageWriter<Play>,
+    mut emit: MessageWriter<Emit>,
 ) {
     let Ok(ctx) = rapier.single() else { return };
     for UdpIn(p) in packets.read() {
@@ -586,9 +587,12 @@ pub fn remote_shots(
             }
             match def.kind {
                 WeaponKind::Hitscan { range, .. } => {
-                    let hit = ctx.cast_ray(origin, dir, range, true, QueryFilter::default().exclude_sensors());
-                    let end = origin + dir * hit.map(|h| h.1).unwrap_or(range.min(300.0));
+                    let hit = ctx.cast_ray_and_get_normal(origin, dir, range, true, QueryFilter::default().exclude_sensors());
+                    let end = origin + dir * hit.map(|h| h.1.time_of_impact).unwrap_or(range.min(300.0));
                     spawn_tracer(&mut b, origin, end);
+                    if let Some((_, ri)) = hit {
+                        emit.write(Emit::new(Burst::Spark, end, ri.normal, 3));
+                    }
                 }
                 WeaponKind::Projectile { speed, .. } => spawn_projectile(&mut b, origin, dir * speed, &s.weapon, false),
                 WeaponKind::Melee { .. } => {}
@@ -633,8 +637,12 @@ pub fn handle_hits(
     }
 }
 
-pub fn spawn_explosions(mut events: MessageReader<Explosion>, mut b: Build, mut play: MessageWriter<Play>) {
+pub fn spawn_explosions(mut events: MessageReader<Explosion>, mut b: Build, mut play: MessageWriter<Play>, mut emit: MessageWriter<Emit>) {
     for ev in events.read() {
+        let n = (ev.radius * 2.0).clamp(6.0, 24.0) as u32;
+        emit.write(Emit::new(Burst::Fire, ev.pos, Vec3::Y, n));
+        emit.write(Emit::new(Burst::Smoke, ev.pos, Vec3::Y, n / 2));
+        emit.write(Emit::new(Burst::Debris, ev.pos, Vec3::Y, n / 2));
         play.write(Play::at(Snd::Boom, ev.pos, (ev.radius / 4.0).clamp(0.6, 2.0)));
         let mat = b.glow(pal::HAZARD);
         let mesh = b.art.sphere.clone();

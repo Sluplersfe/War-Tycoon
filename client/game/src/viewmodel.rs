@@ -133,7 +133,7 @@ pub fn update_viewmodel(
         Res<CombatFx>,
         Res<crate::gunsmith::GunsmithUi>,
     ),
-    (keys, mouse, motion): (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>, Res<AccumulatedMouseMotion>),
+    (actions, motion): (Res<crate::input::Actions>, Res<AccumulatedMouseMotion>),
     mut look: ResMut<Look>,
     mut rig: Query<(Entity, &mut Transform, &mut Visibility), (With<VmRig>, Without<GunAnim>, Without<VmArms>)>,
     mut anims: Query<(&GunAnim, &mut Transform, &mut Visibility), (Without<VmRig>, Without<VmArms>)>,
@@ -171,15 +171,15 @@ pub fn update_viewmodel(
     let speed = me.single().map(|m| Vec2::new(m.0.x, m.0.z).length()).unwrap_or(0.0);
     let on_foot = seat.0.is_none() && vitals.alive() && look.chase == 0.0;
     let can_ads = on_foot && controls.captured && reload.is_none() && !matches!(id.as_str(), "knife" | "grenade");
-    let ads_target = if can_ads && mouse.pressed(MouseButton::Right) { 1.0 } else { 0.0 };
+    let ads_target = if can_ads && actions.aim { 1.0 } else { 0.0 };
     vm.ads = toward(vm.ads, ads_target, dt / h.ads_time.max(0.05));
     let e = smooth(vm.ads);
     look.ads = vm.ads;
     look.zoom = 1.0 + (h.zoom - 1.0) * e;
     look.scoped = h.scoped && vm.ads > 0.96;
-    let sprinting = on_foot && controls.captured && keys.pressed(KeyCode::ShiftLeft) && keys.pressed(KeyCode::KeyW) && speed > 8.0 && vm.ads < 0.1;
+    let sprinting = on_foot && controls.captured && actions.sprint && actions.forward > 0.3 && speed > 8.0 && vm.ads < 0.1;
     vm.sprint = toward(vm.sprint, if sprinting { 1.0 } else { 0.0 }, dt * 5.0);
-    let inspecting = gunsmith.open || (controls.captured && keys.pressed(KeyCode::KeyF) && vm.ads < 0.1);
+    let inspecting = gunsmith.open || (controls.captured && actions.inspect && vm.ads < 0.1);
     vm.inspect = toward(vm.inspect, if inspecting { 1.0 } else { 0.0 }, dt * 2.6);
     vm.draw = (vm.draw + dt * 3.2).min(1.0);
 

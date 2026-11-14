@@ -26,7 +26,9 @@ The client defaults to `76.179.76.99` (override with `FF_SERVER`). The deployed 
 
 ## Controls
 
-WASD move · Shift sprint · Space jump · LMB fire · RMB aim down sights · F inspect weapon · G gunsmith · 1–9 / scroll weapons · R reload · E interact/enter/exit · Enter chat · Tab scores · Esc menu · F1 admin (host).
+WASD move · Shift sprint · Space jump · LMB fire · RMB aim down sights · F inspect weapon · G gunsmith · J challenges · 1–9 / scroll weapons · R reload · E interact/enter/exit · Enter chat · Tab scores · Esc menu · F1 admin (host). Every key can be rebound in Settings, and gamepads are supported (sticks move/look, RT fire, LT aim, A jump, X reload, Y interact, D-pad ↑ gunsmith, Start menu).
+
+Each room has six server-driven Raider bots that hunt players, five capture flags that pay the holding team income, hit markers and damage numbers (gold on headshots), synthesised sound effects, weapon mastery tiers and kill-gated unlocks for the heavier weapons and vehicles, and a first-run tutorial (F9 skips it).
 
 The gunsmith (G) customizes every weapon: optics (iron, red dot, holographic, 3x, 8x), muzzles, underbarrel grips/laser, magazines, stocks, 17 finishes and reticle colours. Everything is free and unlocks with rank (two finishes with rebirths); choices are saved to `<config>/frontline-foundry/armory.json` and other players see your build.
 Vehicles: WASD drive, Space brake (helicopter: Space up, Ctrl down), R flips cars and tanks, mouse aims turret/heading.

@@ -5,14 +5,17 @@ mod audio;
 mod autotest;
 mod combat;
 mod guns;
+mod input;
 mod gunsmith;
 mod net;
 mod objects;
+mod particles;
 mod player;
 mod reconnect;
 mod render;
 mod settings;
 mod state;
+mod tutorial;
 mod tycoon;
 mod ui;
 mod vehicles;
@@ -57,6 +60,9 @@ fn main() {
     .init_state::<AppState>();
 
     app.add_message::<audio::Play>()
+        .add_message::<particles::Emit>()
+        .init_resource::<particles::Decals>()
+        .init_resource::<tutorial::Tutorial>()
         .add_message::<net::Inbound>()
         .add_message::<net::UdpIn>()
         .add_message::<net::Disconnected>()
@@ -72,6 +78,7 @@ fn main() {
         .init_resource::<state::LobbyUi>()
         .init_resource::<state::Feed>()
         .init_resource::<reconnect::Reconnect>()
+        .init_resource::<input::Actions>()
         .init_resource::<objects::NetObjects>()
         .init_resource::<objects::OutShots>()
         .insert_resource(objects::SendTimer(Timer::from_seconds(0.05, TimerMode::Repeating)))
@@ -99,7 +106,9 @@ fn main() {
 
     app.add_systems(Startup, (art::setup_art, world::setup_camera, render::setup_blit, world::spawn_world).chain());
     app.add_systems(Startup, audio::setup_audio);
-    app.add_systems(Update, (audio::footsteps, audio::engine, objects::update_flags).run_if(in_game));
+    app.add_systems(PreUpdate, input::gather.after(bevy::input::InputSystems));
+    app.add_systems(Update, input::capture_rebind);
+    app.add_systems(Update, (audio::footsteps, audio::engine, objects::update_flags, particles::emit, particles::update).run_if(in_game));
 
     app.add_systems(
         Update,
@@ -213,7 +222,7 @@ fn main() {
             ui::menu_ui.run_if(in_state(AppState::Menu)),
             ui::login_ui.run_if(in_state(AppState::Login)),
             ui::lobby_ui.run_if(in_state(AppState::Lobby)),
-            (ui::hud, ui::scoreboard, ui::chat_input, ui::pause_menu, ui::admin_panel, gunsmith::gunsmith_ui, ui::challenges_ui).run_if(in_game),
+            (ui::hud, ui::scoreboard, ui::chat_input, ui::pause_menu, ui::admin_panel, gunsmith::gunsmith_ui, ui::challenges_ui, tutorial::tutorial_ui).run_if(in_game),
             (settings::settings_window, settings::fps_overlay, reconnect::overlay, audio::ui_clicks),
         ),
     );

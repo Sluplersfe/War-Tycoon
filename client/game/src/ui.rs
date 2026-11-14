@@ -492,6 +492,7 @@ pub fn lobby_ui(
 /// Decides whether the UI owns the mouse (pause/chat/admin open) and handles those hotkeys.
 pub fn ui_input(
     keys: Res<ButtonInput<KeyCode>>,
+    actions: Res<crate::input::Actions>,
     mut ui: ResMut<UiState>,
     mut controls: ResMut<Controls>,
     room: Res<Room>,
@@ -499,16 +500,16 @@ pub fn ui_input(
     mut gunsmith: ResMut<crate::gunsmith::GunsmithUi>,
     seat: Res<Seat>,
 ) {
-    if keys.just_pressed(KeyCode::KeyG) && !ui.chat_open && !ui.pause && (gunsmith.open || seat.0.is_none()) {
+    if actions.gunsmith_pressed && !ui.chat_open && !ui.pause && (gunsmith.open || seat.0.is_none()) {
         gunsmith.open = !gunsmith.open;
     }
     if seat.0.is_some() {
         gunsmith.open = false;
     }
-    if keys.just_pressed(KeyCode::KeyJ) && !ui.chat_open && !ui.pause {
+    if actions.challenges_pressed && !ui.chat_open && !ui.pause {
         ui.challenges = !ui.challenges;
     }
-    if keys.just_pressed(KeyCode::Escape) {
+    if keys.just_pressed(KeyCode::Escape) || actions.pause_pressed {
         if ui.challenges {
             ui.challenges = false;
         } else if gunsmith.open {
@@ -523,7 +524,7 @@ pub fn ui_input(
             ui.pause = !ui.pause;
         }
     }
-    if keys.just_pressed(KeyCode::Enter) && !ui.chat_open && !ui.pause && controls.captured {
+    if actions.chat_pressed && !ui.chat_open && !ui.pause && controls.captured {
         ui.chat_open = true;
         ui.chat_focus = true;
     }
@@ -840,8 +841,8 @@ pub fn hud(
     Ok(())
 }
 
-pub fn scoreboard(mut contexts: EguiContexts, keys: Res<ButtonInput<KeyCode>>, room: Res<Room>, econ: Res<Economy>) -> Result {
-    if !keys.pressed(KeyCode::Tab) {
+pub fn scoreboard(mut contexts: EguiContexts, actions: Res<crate::input::Actions>, room: Res<Room>, econ: Res<Economy>) -> Result {
+    if !actions.scoreboard {
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
@@ -972,7 +973,7 @@ pub fn pause_menu(
                 exit.write(AppExit::Success);
             }
             ui.separator();
-            ui.label(RichText::new("WASD move · Shift sprint · Space jump · LMB fire · RMB aim down sights · F inspect\n1-9/scroll weapons · R reload · G gunsmith · E interact/enter/exit · Enter chat · Tab scores\nVehicles: WASD drive, Space brake (heli: Space up, Ctrl down), R flip, mouse aims").size(12.0).color(Color32::GRAY));
+            ui.label(RichText::new("WASD move · Shift sprint · Space jump · LMB fire · RMB aim down sights · F inspect\n1-9/scroll weapons · R reload · G gunsmith · J challenges · E interact/enter/exit · Enter chat · Tab scores\nKeys are rebindable in Settings; gamepads work too. Vehicles: WASD drive, Space brake (heli: Space up, Ctrl down), R flip, mouse aims").size(12.0).color(Color32::GRAY));
         });
     Ok(())
 }

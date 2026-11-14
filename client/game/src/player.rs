@@ -217,20 +217,28 @@ pub fn mouse_look(
     controls: Res<Controls>,
     mut look: ResMut<Look>,
     settings: Res<crate::settings::Settings>,
+    actions: Res<crate::input::Actions>,
+    time: Res<Time>,
 ) {
     if !controls.captured {
         return;
     }
     let sens = 0.0025 * settings.sensitivity / look.zoom.max(1.0);
     let flip = if settings.invert_y { -1.0 } else { 1.0 };
-    look.yaw -= motion.delta.x * sens;
-    look.pitch = (look.pitch - motion.delta.y * sens * flip).clamp(-1.4, 1.3);
+    let mut dx = motion.delta.x * sens;
+    let mut dy = motion.delta.y * sens * flip;
+    // Right stick: a turn rate, so it scales with time rather than frames.
+    let pad = 2.8 * settings.pad_sensitivity / look.zoom.max(1.0) * time.delta_secs();
+    dx += actions.look.x * pad;
+    dy -= actions.look.y * pad * flip;
+    look.yaw -= dx;
+    look.pitch = (look.pitch - dy).clamp(-1.4, 1.3);
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn move_player(
     time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
+    actions: Res<crate::input::Actions>,
     controls: Res<Controls>,
     look: Res<Look>,
     seat: Res<Seat>,
@@ -266,26 +274,15 @@ pub fn move_player(
     }
     let mut wish = Vec3::ZERO;
     if controls.captured {
-        if keys.pressed(KeyCode::KeyW) {
-            wish.z += 1.0;
-        }
-        if keys.pressed(KeyCode::KeyS) {
-            wish.z -= 1.0;
-        }
-        if keys.pressed(KeyCode::KeyA) {
-            wish.x += 1.0;
-        }
-        if keys.pressed(KeyCode::KeyD) {
-            wish.x -= 1.0;
-        }
+        wish = Vec3::new(actions.strafe, 0.0, actions.forward).clamp_length_max(1.0);
     }
-    let speed = if keys.pressed(KeyCode::ShiftLeft) && wish.z > 0.0 { SPRINT } else { WALK };
+    let speed = if actions.sprint && wish.z > 0.0 { SPRINT } else { WALK };
     let yaw = Quat::from_rotation_y(look.yaw);
-    let horiz = yaw * wish.normalize_or_zero() * speed;
+    let horiz = yaw * wish * speed;
     let grounded = out.map(|o| o.grounded).unwrap_or(false);
     if grounded {
         vitals.vy = -1.0;
-        if controls.captured && keys.just_pressed(KeyCode::Space) {
+        if controls.captured && actions.jump_pressed {
             vitals.vy = JUMP;
         }
     } else {
@@ -492,7 +489,7 @@ pub fn life_cycle(
 /// Offers entering nearby vehicles and handles E presses.
 #[allow(clippy::too_many_arguments)]
 pub fn interact(
-    keys: Res<ButtonInput<KeyCode>>,
+    actions: Res<crate::input::Actions>,
     controls: Res<Controls>,
     mut inter: ResMut<Interact>,
     seat: Res<Seat>,
@@ -521,7 +518,7 @@ pub fn interact(
             inter.offer(d, label, Action::Enter { id: o.id, seat: free as u32 });
         }
     }
-    if !(controls.captured && keys.just_pressed(KeyCode::KeyE)) {
+    if !(controls.captured && actions.interact_pressed) {
         return;
     }
     let Some((_, _, action)) = inter.best.clone() else { return };

@@ -101,15 +101,12 @@ fn wrap(a: f32) -> f32 {
     a
 }
 
-fn axis(keys: &ButtonInput<KeyCode>, pos: KeyCode, neg: KeyCode) -> f32 {
-    (keys.pressed(pos) as i32 - keys.pressed(neg) as i32) as f32
-}
 
 /// Applies the driver's input to the vehicle they own.
 #[allow(clippy::too_many_arguments)]
 pub fn drive(
     time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
+    actions: Res<crate::input::Actions>,
     controls: Res<Controls>,
     look: Res<Look>,
     seat: Res<Seat>,
@@ -136,11 +133,11 @@ pub fn drive(
         obj.extra.resize(4, 0.0);
     }
     let live = controls.captured;
-    let throttle = if live { axis(&keys, KeyCode::KeyW, KeyCode::KeyS) } else { 0.0 };
-    let steer = if live { axis(&keys, KeyCode::KeyA, KeyCode::KeyD) } else { 0.0 };
-    let space = live && keys.pressed(KeyCode::Space);
+    let throttle = if live { actions.forward } else { 0.0 };
+    let steer = if live { actions.strafe } else { 0.0 };
+    let space = live && actions.jump_held;
 
-    if live && keys.just_pressed(KeyCode::KeyR) && matches!(vb.class, VehicleClass::Car | VehicleClass::Tank) {
+    if live && actions.reload_pressed && matches!(vb.class, VehicleClass::Car | VehicleClass::Tank) {
         let (yaw, _, _) = t.rotation.to_euler(EulerRot::YXZ);
         t.rotation = Quat::from_rotation_y(yaw);
         t.translation.y += 2.0;
@@ -188,7 +185,7 @@ pub fn drive(
             obj.extra[X_ROTOR] = 0.0;
         }
         VehicleClass::Heli => {
-            let up = if live { axis(&keys, KeyCode::Space, KeyCode::ControlLeft) } else { 0.0 };
+            let up = if live { actions.climb } else { 0.0 };
             let diff = wrap(look.yaw - hull_yaw);
             vel.angular = Vec3::new(0.0, (diff * 3.0).clamp(-1.8, 1.8), 0.0);
             let yaw = Quat::from_rotation_y(hull_yaw);
