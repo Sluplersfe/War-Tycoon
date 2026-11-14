@@ -1,6 +1,6 @@
-//! Pixel size: the 3D scene (world + weapon) draws into an offscreen image at
-//! 1/n of the window size and is stretched to the window with nearest-neighbour
-//! filtering, so each rendered pixel covers n×n screen pixels.
+//! Render resolution: the 3D scene (world + weapon) draws into an offscreen
+//! image of the chosen height (e.g. 720p, window aspect ratio) and is stretched
+//! to the window with nearest-neighbour filtering.
 //! The UI stays crisp because egui lives on a separate camera that draws to the
 //! window itself.
 
@@ -51,9 +51,8 @@ pub fn apply_render_scale(
     mut cams: Query<&mut RenderTarget, Or<(With<MainCamera>, With<ViewModelCam>)>>,
     mut blit: Single<(&mut Visibility, &mut Sprite), With<Blit>>,
 ) {
-    let scale = 1.0 / settings.pixel_size.max(1) as f32;
-    let native = settings.pixel_size <= 1;
-    let want_image = !native;
+    let (pw, ph) = (window.physical_width() as f32, window.physical_height() as f32);
+    let want_image = settings.render_height != 0 && (settings.render_height as f32) < ph;
     for mut t in &mut cams {
         let is_image = matches!(*t, RenderTarget::Image(_));
         if want_image != is_image {
@@ -72,8 +71,8 @@ pub fn apply_render_scale(
     if !want_image {
         return;
     }
-    let (pw, ph) = (window.physical_width() as f32, window.physical_height() as f32);
-    let size = UVec2::new(((pw * scale) as u32).max(64), ((ph * scale) as u32).max(64));
+    let rh = settings.render_height as f32;
+    let size = UVec2::new((rh * pw / ph).round().max(16.0) as u32, rh as u32);
     if let Some(img) = images.get(&scene.0) {
         if img.size() != size {
             if let Some(mut img) = images.get_mut(&scene.0) {

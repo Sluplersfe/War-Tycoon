@@ -16,8 +16,8 @@ pub struct Settings {
     pub invert_y: bool,
     pub fov: f32,
     pub fullscreen: bool,
-    /// Screen pixels per rendered pixel along each axis (1 = native, 4 = 16 pixels per rendered pixel).
-    pub pixel_size: u32,
+    /// Vertical render resolution in pixels (0 = native, i.e. the window size).
+    pub render_height: u32,
     pub vsync: bool,
     pub ui_scale: f32,
     pub show_fps: bool,
@@ -25,7 +25,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { sensitivity: 1.0, invert_y: false, fov: 70.0, fullscreen: false, pixel_size: 1, vsync: true, ui_scale: 1.0, show_fps: false }
+        Self { sensitivity: 1.0, invert_y: false, fov: 70.0, fullscreen: false, render_height: 0, vsync: true, ui_scale: 1.0, show_fps: false }
     }
 }
 
@@ -51,7 +51,9 @@ impl Settings {
         self.sensitivity = self.sensitivity.clamp(0.1, 4.0);
         self.fov = self.fov.clamp(50.0, 120.0);
         self.ui_scale = self.ui_scale.clamp(0.7, 2.0);
-        self.pixel_size = self.pixel_size.clamp(1, 16);
+        if self.render_height != 0 {
+            self.render_height = self.render_height.clamp(108, 4320);
+        }
         self
     }
 }
@@ -135,13 +137,13 @@ pub fn settings_window(
                 ui.label("Field of view");
                 ui.add(egui::Slider::new(&mut s.fov, 50.0..=120.0).fixed_decimals(0).suffix("°"));
                 ui.end_row();
-                ui.label("Pixel size");
-                egui::ComboBox::from_id_salt("pixel_size")
-                    .selected_text(if s.pixel_size == 1 { "Native".to_string() } else { format!("{0}×{0} ({1} px per pixel)", s.pixel_size, s.pixel_size * s.pixel_size) })
+                ui.label("Render resolution");
+                let name = |h: u32| if h == 0 { "Native".to_string() } else { format!("{h}p") };
+                egui::ComboBox::from_id_salt("render_height")
+                    .selected_text(name(s.render_height))
                     .show_ui(ui, |ui| {
-                        for v in PIXEL_SIZES {
-                            let label = if v == 1 { "Native".to_string() } else { format!("{0}×{0} ({1} px per pixel)", v, v * v) };
-                            ui.selectable_value(&mut s.pixel_size, v, label);
+                        for v in RENDER_HEIGHTS {
+                            ui.selectable_value(&mut s.render_height, v, name(v));
                         }
                     });
                 ui.end_row();
@@ -189,7 +191,7 @@ pub fn settings_window(
     Ok(())
 }
 
-const PIXEL_SIZES: [u32; 7] = [1, 2, 3, 4, 6, 8, 12];
+const RENDER_HEIGHTS: [u32; 9] = [0, 144, 240, 360, 480, 720, 1080, 1440, 2160];
 
 fn section(ui: &mut egui::Ui, name: &str) {
     ui.label(RichText::new(name.to_uppercase()).size(12.0).color(Color32::from_rgb(0xA8, 0xA0, 0x80)).strong());
