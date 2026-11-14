@@ -35,6 +35,8 @@ type conn struct {
 	plot   int
 	avatar uint64
 	limits map[string]*window
+	// lastFar records when each far-away object's state was last sent to this player.
+	lastFar map[uint64]time.Time
 }
 
 type window struct {
@@ -156,7 +158,7 @@ func (r *Room) join(ctx context.Context, p Peer) error {
 	avatar := r.reg.Spawn(pb.ObjectKind_OBJECT_KIND_PLAYER, "soldier", uid, uid, &pb.ObjectState{
 		Pos: &pb.Vec3{X: spawn[0], Y: spawn[1], Z: spawn[2]}, Rot: yawQuat(yaw), Health: 100,
 	})
-	c := &conn{peer: p, plot: plot, avatar: avatar.ID, limits: map[string]*window{}}
+	c := &conn{peer: p, plot: plot, avatar: avatar.ID, limits: map[string]*window{}, lastFar: map[uint64]time.Time{}}
 	r.conns[uid] = c
 
 	info := r.playerInfo(pl)
@@ -360,17 +362,69 @@ func (r *Room) step(dt float32) {
 	}
 }
 
+// Interest management: objects within nearRadius of a player are relayed at
+// the full rate; farther ones are thinned to one update per farInterval, and
+// shots beyond shotRadius are not sent at all.
+const (
+	nearRadius  = 350.0
+	shotRadius  = 700.0
+	farInterval = 250 * time.Millisecond
+)
+
+func dist2(a, b *pb.Vec3) float64 {
+	dx, dy, dz := float64(a.GetX()-b.GetX()), float64(a.GetY()-b.GetY()), float64(a.GetZ()-b.GetZ())
+	return dx*dx + dy*dy + dz*dz
+}
+
+// viewpoint is where a player's avatar currently is, or nil if unknown.
+func (r *Room) viewpoint(c *conn) *pb.Vec3 {
+	if o := r.reg.Objects[c.avatar]; o != nil && o.State != nil {
+		return o.State.Pos
+	}
+	return nil
+}
+
 func (r *Room) sendUDPAll(pkt *pb.UdpPacket, except uint64) {
 	r.seq++
 	pkt.Seq = r.seq
-	b, err := proto.Marshal(pkt)
-	if err != nil {
-		return
-	}
+	var full []byte // marshalled once for players who need everything
+	now := time.Now()
 	for uid, c := range r.conns {
-		if uid != except {
-			c.peer.SendUDP(b)
+		if uid == except {
+			continue
 		}
+		view := r.viewpoint(c)
+		if view == nil {
+			if full == nil {
+				full, _ = proto.Marshal(pkt)
+			}
+			c.peer.SendUDP(full)
+			continue
+		}
+		out := &pb.UdpPacket{Tick: pkt.Tick, Seq: pkt.Seq}
+		for _, u := range pkt.Updates {
+			if u.State == nil || dist2(u.State.Pos, view) <= nearRadius*nearRadius {
+				out.Updates = append(out.Updates, u)
+				continue
+			}
+			if now.Sub(c.lastFar[u.Id]) >= farInterval {
+				c.lastFar[u.Id] = now
+				out.Updates = append(out.Updates, u)
+			}
+		}
+		for _, s := range pkt.Shots {
+			if s.Origin == nil || dist2(s.Origin, view) <= shotRadius*shotRadius {
+				out.Shots = append(out.Shots, s)
+			}
+		}
+		if len(out.Updates) == 0 && len(out.Shots) == 0 {
+			continue
+		}
+		b, err := proto.Marshal(out)
+		if err != nil {
+			continue
+		}
+		c.peer.SendUDP(b)
 	}
 }
 

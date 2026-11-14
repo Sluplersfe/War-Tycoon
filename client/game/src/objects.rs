@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 use frontline_proto::pb::{self, ObjectKind, server_msg::Msg as S};
-use frontline_sim::interp::{Buffer, INTERP_DELAY, Snapshot};
+use frontline_sim::interp::{Buffer, Snapshot};
 
 use crate::art::{Build, pal};
 use crate::net::{Inbound, Net, UdpIn};
@@ -298,12 +298,12 @@ pub fn sync_body_modes(
 }
 
 pub fn interpolate(room: Res<Room>, time: Res<Time>, mut q: Query<(&NetObject, &Interp, &mut Transform)>) {
-    let t = time.elapsed_secs_f64() - INTERP_DELAY;
+    let now = time.elapsed_secs_f64();
     for (obj, interp, mut tr) in &mut q {
         if obj.owner == room.me {
             continue;
         }
-        if let Some((p, r)) = interp.0.sample(t) {
+        if let Some((p, r)) = interp.0.sample(now - interp.0.delay()) {
             tr.translation = p;
             tr.rotation = r;
         }

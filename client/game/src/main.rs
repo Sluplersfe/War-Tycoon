@@ -8,6 +8,7 @@ mod gunsmith;
 mod net;
 mod objects;
 mod player;
+mod reconnect;
 mod render;
 mod settings;
 mod state;
@@ -68,6 +69,7 @@ fn main() {
         .init_resource::<state::LoginUi>()
         .init_resource::<state::LobbyUi>()
         .init_resource::<state::Feed>()
+        .init_resource::<reconnect::Reconnect>()
         .init_resource::<objects::NetObjects>()
         .init_resource::<objects::OutShots>()
         .insert_resource(objects::SendTimer(Timer::from_seconds(0.05, TimerMode::Repeating)))
@@ -102,8 +104,12 @@ fn main() {
             state::on_disconnect,
             state::handle_session_messages,
             art::spin_parts,
+            reconnect::drive,
+            reconnect::replay_join,
+            reconnect::restore,
             settings::apply_settings,
             render::apply_render_scale,
+            render::apply_quality,
             world::menu_camera.run_if(not(in_state(AppState::InGame))),
         )
             .chain(),
@@ -201,7 +207,7 @@ fn main() {
             ui::login_ui.run_if(in_state(AppState::Login)),
             ui::lobby_ui.run_if(in_state(AppState::Lobby)),
             (ui::hud, ui::scoreboard, ui::chat_input, ui::pause_menu, ui::admin_panel, gunsmith::gunsmith_ui).run_if(in_game),
-            (settings::settings_window, settings::fps_overlay),
+            (settings::settings_window, settings::fps_overlay, reconnect::overlay),
         ),
     );
 

@@ -217,14 +217,33 @@ impl Feed {
 
 // ---------- systems ----------
 
+#[allow(clippy::too_many_arguments)]
 pub fn on_disconnect(
     mut lost: MessageReader<Disconnected>,
     mut next: ResMut<NextState<AppState>>,
     mut login: ResMut<LoginUi>,
     state: Res<State<AppState>>,
+    mut rc: ResMut<crate::reconnect::Reconnect>,
+    room: Option<Res<Room>>,
+    econ: Option<Res<Economy>>,
 ) {
     for Disconnected(reason) in lost.read() {
         login.busy = false;
+        // A dropped connection in a match is retried instead of kicking the player out.
+        if *state.get() == AppState::InGame && !rc.active {
+            if let Some(room) = &room {
+                rc.begin(room.summary.id, econ.as_deref());
+                continue;
+            }
+        }
+        if rc.active {
+            if !rc.failed() {
+                rc.give_up();
+                login.error = Some("Couldn't reconnect to the game server.".into());
+                next.set(AppState::Menu);
+            }
+            continue;
+        }
         if !reason.is_empty() {
             login.error = Some(reason.clone());
         }
@@ -247,10 +266,20 @@ pub fn handle_session_messages(
     data: Res<GameData>,
     mut feed: ResMut<Feed>,
     time: Res<Time>,
+    mut rc: ResMut<crate::reconnect::Reconnect>,
 ) {
     let now = time.elapsed_secs_f64();
     for Inbound(msg) in inbound.read() {
         match msg {
+            S::AuthOk(_) if rc.active => {
+                net.send(C::JoinRoom(pb::JoinRoom { room_id: rc.room_id }));
+            }
+            S::Error(e) if rc.active && rc.joined.is_none() => {
+                rc.give_up();
+                net.disconnect();
+                login.error = Some(e.message.clone());
+                next.set(AppState::Menu);
+            }
             S::AuthOk(a) => {
                 me.id = a.user_id;
                 me.name = a.username.clone();
@@ -285,7 +314,12 @@ pub fn handle_session_messages(
             }
             S::RoomJoined(j) => {
                 if *state.get() == AppState::InGame {
-                    continue; // duplicate join reply; the world is already built
+                    if rc.active && rc.joined.is_none() {
+                        // Rejoined after a drop: tear the old world down, then rebuild from this reply.
+                        rc.joined = Some(j.clone());
+                        next.set(AppState::Lobby);
+                    }
+                    continue; // otherwise a duplicate join reply; the world is already built
                 }
                 let you = j.you.clone().unwrap_or_default();
                 let mut players: BTreeMap<u64, pb::PlayerInfo> =

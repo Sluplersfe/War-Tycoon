@@ -85,3 +85,37 @@ pub fn apply_render_scale(
         sprite.custom_size = Some(logical);
     }
 }
+
+/// Applies the quality settings (anti-aliasing, shadows, draw distance) when they change.
+pub fn apply_quality(
+    settings: Res<Settings>,
+    mut msaa: Query<&mut Msaa, Or<(With<MainCamera>, With<ViewModelCam>)>>,
+    mut lights: Query<&mut DirectionalLight>,
+    mut main: Query<(&mut Projection, &mut DistanceFog), With<MainCamera>>,
+    mut first: Local<bool>,
+) {
+    if !settings.is_changed() && *first {
+        return;
+    }
+    *first = true;
+    let want = match settings.msaa {
+        0 => Msaa::Off,
+        2 => Msaa::Sample2,
+        _ => Msaa::Sample4,
+    };
+    for mut m in &mut msaa {
+        if *m != want {
+            *m = want;
+        }
+    }
+    for mut l in &mut lights {
+        l.shadow_maps_enabled = settings.shadows;
+    }
+    for (mut proj, mut fog) in &mut main {
+        let k = settings.draw_distance;
+        if let Projection::Perspective(p) = &mut *proj {
+            p.far = 3000.0 * k;
+        }
+        fog.falloff = FogFalloff::Linear { start: 350.0 * k, end: 1400.0 * k };
+    }
+}
