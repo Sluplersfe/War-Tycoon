@@ -232,16 +232,23 @@ func (r *Room) stepArena(dt float32) []*ownership.Object {
 
 // botShoot rolls a hit and tells the target's client to apply the damage.
 func (r *Room) botShoot(bot *ownership.Object, uid uint64, eye, tgt [3]float32, dist float32) {
-	dir := &pb.Vec3{X: tgt[0] - eye[0], Y: tgt[1] - eye[1], Z: tgt[2] - eye[2]}
-	pkt := &pb.UdpPacket{Tick: r.tick, Shots: []*pb.ProjectileFired{{
-		Shooter: 0, Weapon: "rifle", Origin: &pb.Vec3{X: eye[0], Y: eye[1], Z: eye[2]}, Dir: dir,
-	}}}
-	r.sendUDPAll(pkt, 0)
 	chance := 0.62 - dist/150
 	if chance < 0.12 {
 		chance = 0.12
 	}
-	if r.arena.rng.Float32() > chance {
+	hit := r.arena.rng.Float32() <= chance
+	dir := &pb.Vec3{X: tgt[0] - eye[0], Y: tgt[1] - eye[1], Z: tgt[2] - eye[2]}
+	if !hit {
+		// A miss is drawn as a shot that goes wide, so players can see and hear it.
+		off := func() float32 { return (r.arena.rng.Float32() - 0.5) * (1.2 + dist*0.06) }
+		dir.X += off()
+		dir.Y += off() * 0.5
+		dir.Z += off()
+	}
+	r.sendUDPAll(&pb.UdpPacket{Tick: r.tick, Shots: []*pb.ProjectileFired{{
+		Shooter: 0, Weapon: "rifle", Origin: &pb.Vec3{X: eye[0], Y: eye[1], Z: eye[2]}, Dir: dir,
+	}}}, 0)
+	if !hit {
 		return
 	}
 	c := r.conns[uid]

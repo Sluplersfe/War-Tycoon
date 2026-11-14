@@ -6,6 +6,7 @@ mod autotest;
 mod combat;
 mod guns;
 mod input;
+mod machines;
 mod gunsmith;
 mod net;
 mod objects;
@@ -67,6 +68,8 @@ fn main() {
         .add_message::<net::UdpIn>()
         .add_message::<net::Disconnected>()
         .add_message::<objects::Explosion>()
+        .add_message::<machines::MachineStrike>()
+        .init_resource::<machines::Machines>()
         .add_message::<tycoon::RebirthRequest>()
         .add_message::<tycoon::SpawnVehicleRequest>();
 
@@ -138,6 +141,7 @@ fn main() {
             objects::spawn_initial,
             combat::reset_loadout,
             tycoon::reset_state,
+            machines::reset,
         )
             .chain(),
     );
@@ -176,6 +180,10 @@ fn main() {
                 tycoon::sync_pads,
                 tycoon::pad_colors,
                 tycoon::buy_on_pads,
+                machines::take_damage,
+                machines::strikes,
+                machines::publish,
+                machines::effects,
                 tycoon::production,
                 tycoon::claim_pad,
                 tycoon::offer_actions,

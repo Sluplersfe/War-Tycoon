@@ -299,11 +299,13 @@ pub fn spawn_tracer(b: &mut Build, from: Vec3, to: Vec3) {
     }
     let mat = b.glow(pal::AMBER);
     let mesh = b.art.cube.clone();
+    // Thicker with distance so far-away fire stays visible.
+    let w = (0.05 + len * 0.0012).min(0.22);
     b.commands.spawn((
         Mesh3d(mesh),
         MeshMaterial3d(mat),
-        Transform::from_translation(from + d / 2.0).looking_to(d / len, Vec3::Y).with_scale(Vec3::new(0.05, 0.05, len)),
-        Fx { life: 0.07, grow: Vec3::ZERO },
+        Transform::from_translation(from + d / 2.0).looking_to(d / len, Vec3::Y).with_scale(Vec3::new(w, w, len)),
+        Fx { life: 0.1, grow: Vec3::ZERO },
         bevy::light::NotShadowCaster,
     ));
 }
@@ -338,6 +340,7 @@ pub fn fire(
     targets: Query<(&NetObject, &Transform), Without<MainCamera>>,
     mut play: MessageWriter<Play>,
     mut emit: MessageWriter<Emit>,
+    mut strike: MessageWriter<crate::machines::MachineStrike>,
 ) {
     if !controls.captured || !vitals.alive() {
         return;
@@ -444,6 +447,7 @@ pub fn fire(
                             }
                         }
                         Err(_) => {
+                            strike.write(crate::machines::MachineStrike { entity: Some(e), point: end, damage: def.damage, radius: 0.0, weapon: wid.clone() });
                             for ev in Emit::impact(end, normal) {
                                 emit.write(ev);
                             }
@@ -493,6 +497,7 @@ pub fn update_projectiles(
     targets: Query<(&NetObject, &Transform), Without<Projectile>>,
     mut boom: MessageWriter<Explosion>,
     mut emit: MessageWriter<Emit>,
+    mut strike: MessageWriter<crate::machines::MachineStrike>,
 ) {
     let Ok(ctx) = rapier.single() else { return };
     let dt = time.delta_secs().min(0.05);
@@ -526,6 +531,7 @@ pub fn update_projectiles(
             let point = from + step / len * toi;
             boom.write(Explosion { pos: point, radius: splash });
             if p.mine {
+                strike.write(crate::machines::MachineStrike { entity: None, point, damage: def.damage, radius: splash, weapon: p.weapon.clone() });
                 let mut sent = Vec::new();
                 for (obj, ot) in &targets {
                     let d = if obj.kind == ObjectKind::Player {
@@ -613,11 +619,31 @@ pub fn handle_hits(
     mut fx: ResMut<CombatFx>,
     mut q: Query<(&mut NetObject, &Transform)>,
     mut play: MessageWriter<Play>,
+    seat: Res<Seat>,
+    mut emit: MessageWriter<Emit>,
 ) {
     let now = time.elapsed_secs_f64();
     for Inbound(msg) in inbound.read() {
         let S::Hit(h) = msg else { continue };
+        if h.weapon.starts_with("machine:") {
+            continue; // handled by machines::take_damage
+        }
         if h.target_id == room.avatar_id {
+            // Driving: the vehicle soaks the damage, not the driver.
+            if let Some(s) = seat.driving().filter(|_| room.is_enemy(h.from) || h.from == 0) {
+                if let Ok((mut v, vt)) = q.get_mut(s.vehicle) {
+                    if v.health > 0.0 {
+                        v.health -= h.damage;
+                        fx.hurt_at = now;
+                        play.write(Play::ui(Snd::Hurt));
+                        emit.write(Emit::new(Burst::Spark, vt.translation + Vec3::Y, Vec3::Y, 4));
+                        if v.health <= 0.0 {
+                            net.send(C::Despawn(pb::DespawnObject { id: v.id, destroyed: true }));
+                        }
+                        continue;
+                    }
+                }
+            }
             if room.is_enemy(h.from) && vitals.damage(now, h.damage, h.from, &h.weapon) {
                 fx.hurt_at = now;
                 play.write(Play::ui(Snd::Hurt));

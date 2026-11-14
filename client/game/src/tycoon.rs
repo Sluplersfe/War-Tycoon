@@ -86,6 +86,15 @@ fn solid(b: &mut Build, parent: Entity, center: Vec3, he: Vec3) {
     b.commands.entity(parent).add_child(e);
 }
 
+/// A collider that belongs to a raidable production line.
+fn msolid(b: &mut Build, parent: Entity, owner: u64, line: usize, center: Vec3, he: Vec3) {
+    let e = b
+        .commands
+        .spawn((Transform::from_translation(center), Visibility::default(), Collider::cuboid(he.x, he.y, he.z), crate::machines::Machine { owner, line }))
+        .id();
+    b.commands.entity(parent).add_child(e);
+}
+
 fn wall(b: &mut Build, parent: Entity, center: Vec3, size: Vec3) {
     b.boxp(parent, pal::CONCRETE, center + Vec3::Y * size.y / 2.0, size);
     b.boxp(parent, pal::CONCRETE_DARK, center + Vec3::Y * (size.y + 0.1), Vec3::new(size.x + 0.3, 0.2, size.z + 0.3));
@@ -125,9 +134,9 @@ fn build_item(b: &mut Build, root: Entity, data: &GameData, item: &ItemDef, me_u
             b.boxp(root, pal::CONCRETE_DARK, v(cx + 0.1, 1.5, z), v(0.3, 2.0, 3.6));
             let g = b.glow(pal::AMBER);
             b.boxm(root, g, v(cx + 1.7, 2.25, z), v(2.0, 0.1, 2.6));
-            solid(b, root, v(cx + 1.7, 1.1, z), v(1.5, 1.1, 1.7));
-            solid(b, root, v((sx + cx) / 2.0, BELT_TOP / 2.0 - 0.05, z), v(len / 2.0, (BELT_TOP - 0.1) / 2.0, 1.1));
-            solid(b, root, v(cx + 0.1, 1.5, z), v(0.15, 1.0, 1.8));
+            msolid(b, root, me_user, *line, v(cx + 1.7, 1.1, z), v(1.5, 1.1, 1.7));
+            msolid(b, root, me_user, *line, v((sx + cx) / 2.0, BELT_TOP / 2.0 - 0.05, z), v(len / 2.0, (BELT_TOP - 0.1) / 2.0, 1.1));
+            msolid(b, root, me_user, *line, v(cx + 0.1, 1.5, z), v(0.15, 1.0, 1.8));
         }
         ItemKind::Dropper { line, .. } => {
             let z = data.catalog.lines[*line].start.1;
@@ -140,10 +149,10 @@ fn build_item(b: &mut Build, root: Entity, data: &GameData, item: &ItemDef, me_u
             let g = b.glow(pal::AMBER);
             b.boxm(root, g, v(p.x, 6.45, z), v(1.8, 0.1, 1.8));
             for (dx, dz) in [(-1.1, -1.1), (1.1, -1.1), (-1.1, 1.1), (1.1, 1.1)] {
-                solid(b, root, v(p.x + dx, 2.6, z + dz), v(0.15, 2.6, 0.15));
+                msolid(b, root, me_user, *line, v(p.x + dx, 2.6, z + dz), v(0.15, 2.6, 0.15));
             }
-            solid(b, root, v(p.x, 5.7, z), v(1.4, 0.7, 1.4));
-            solid(b, root, v(p.x, 3.4, z), v(0.25, 1.1, 0.25));
+            msolid(b, root, me_user, *line, v(p.x, 5.7, z), v(1.4, 0.7, 1.4));
+            msolid(b, root, me_user, *line, v(p.x, 3.4, z), v(0.25, 1.1, 0.25));
         }
         ItemKind::Upgrader { line, .. } => {
             let z = data.catalog.lines[*line].start.1;
@@ -156,9 +165,9 @@ fn build_item(b: &mut Build, root: Entity, data: &GameData, item: &ItemDef, me_u
             let g = b.glow(pal::AMBER);
             b.boxm(root, g, v(p.x, 1.0, z - 1.5), v(0.2, 1.2, 0.1));
             for s in [-1.0, 1.0] {
-                solid(b, root, v(p.x, 2.0, z + 1.8 * s), v(0.7, 2.0, 0.3));
+                msolid(b, root, me_user, *line, v(p.x, 2.0, z + 1.8 * s), v(0.7, 2.0, 0.3));
             }
-            solid(b, root, v(p.x, 4.2, z), v(0.7, 0.35, 2.1));
+            msolid(b, root, me_user, *line, v(p.x, 4.2, z), v(0.7, 0.35, 2.1));
         }
         ItemKind::Wall { size } => wall(b, root, v(p.x, 0.0, p.z), v(size.0, size.1, size.2)),
         ItemKind::Walls { parts } => {
@@ -519,17 +528,19 @@ pub fn production(
     data: Res<GameData>,
     mut econ: ResMut<Economy>,
     mut prod: ResMut<Production>,
+    machines: Res<crate::machines::Machines>,
     roots: Query<(Entity, &BaseRoot)>,
     mut ores: Query<(Entity, &mut Ore, &mut Transform)>,
 ) {
     let Some((root, _)) = roots.iter().find(|(_, r)| r.user == room.me) else { return };
     let dt = time.delta_secs().min(0.1);
+    let now = time.elapsed_secs_f64();
     let cat = &data.catalog;
 
     let mut spawns = Vec::new();
     for item in cat.owns_kind(&econ.base) {
         if let ItemKind::Dropper { line, value, interval } = item.kind {
-            if !cat.has_line(&econ.base, line) {
+            if !cat.has_line(&econ.base, line) || machines.offline(line, now) {
                 continue;
             }
             let t = prod.timers.entry(item.id.clone()).or_insert(0.0);
@@ -582,7 +593,9 @@ pub fn production(
                 }
             }
             if t.translation.x >= end {
-                banked += ore.value as f64 * mult as f64;
+                if !machines.offline(ore.line, now) {
+                    banked += ore.value as f64 * mult as f64;
+                }
                 b.commands.entity(e).despawn();
             }
         }
@@ -662,6 +675,8 @@ pub fn handle_requests(
     mut econ: ResMut<Economy>,
     mut feed: ResMut<Feed>,
     mut prod: ResMut<Production>,
+    mut sig: ResMut<PadSig>,
+    mut machines: ResMut<crate::machines::Machines>,
     vehicles: Query<&NetObject, With<VehicleBody>>,
     ores: Query<Entity, With<Ore>>,
     mut commands: Commands,
@@ -675,8 +690,16 @@ pub fn handle_requests(
         econ.rebirths += 1;
         econ.cash = room.settings.starting_cash;
         econ.bank = 0.0;
-        econ.base = BaseState::default();
+        // Mastery progress survives a rebirth; the base itself does not.
+        econ.base = BaseState { weapon_kills: std::mem::take(&mut econ.base.weapon_kills), claimed: std::mem::take(&mut econ.base.claimed), ..Default::default() };
         econ.save_now();
+        sig.0.clear();
+        *machines = crate::machines::Machines::default();
+        for o in &vehicles {
+            if o.spawned_by == room.me {
+                net.send(C::Despawn(pb::DespawnObject { id: o.id, destroyed: false }));
+            }
+        }
         prod.timers.clear();
         for e in &ores {
             commands.entity(e).despawn();
